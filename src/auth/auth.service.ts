@@ -56,7 +56,7 @@ export class AuthService {
 
     const isMatch = await this.comparePasswords({
       password,
-      hash: foundUser.hashedpassword,
+      hash: foundUser.hashedpassword as string,
     });
 
     if (!isMatch) {
