@@ -13,4 +13,46 @@ model userdata {
   hashedpassword String
   createdAt DateTime @default(now())
   updateAt DateTime @updatedAt()
+  project Project[]
+}
+
+model Project {
+  id        String    @id @default(uuid())
+  name      String
+  userId    Int
+  user      userdata  @relation(fields: [userId], references: [id])
+  layouts   Layout[]
+  createdAt DateTime  @default(now())
+}
+
+model Layout {
+  id          String           @id @default(uuid())
+  name        String
+  gridSize    Int
+  project     Project          @relation(fields: [projectId], references: [id])
+  projectId   String
+  departments Department[]
+  craftResults CraftResult[]
+  createdAt   DateTime         @default(now())
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String
+  x         Int
+  y         Int
+  width     Int
+  height    Int
+  layout    Layout   @relation(fields: [layoutId], references: [id])
+  layoutId  String
+}
+
+model CraftResult {
+  id          String   @id @default(uuid())
+  layout      Layout   @relation(fields: [layoutId], references: [id])
+  layoutId    String
+  totalCost   Int
+  totalDistance Int
+  resultJson  Json      // เก็บ assignment, matrix ฯลฯ
+  createdAt   DateTime  @default(now())
 }
