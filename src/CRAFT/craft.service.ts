@@ -1,29 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
+import { CreateLayoutDto } from './dto/craft.dto';
 
 @Injectable()
 export class craftAlgoService {
   constructor(private databaseService: DatabaseService) {}
 
-  async createLayoutWithDepartments(input: {
-    name: string;
-    gridSize: number;
-    projectId: string;
-    departments: Array<{
-      name: string;
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    }>;
-  }) {
+  async createLayoutDepartments(dto: CreateLayoutDto) {
     return this.databaseService.layout.create({
       data: {
-        name: input.name,
-        gridSize: input.gridSize,
-        projectId: input.projectId,
+        name: dto.name,
+        gridSize: dto.gridSize,
+        projectId: dto.projectId,
         departments: {
-          create: input.departments.map((dep) => ({
+          create: dto.departments.map((dep) => ({
             name: dep.name,
             x: dep.x,
             y: dep.y,
@@ -32,7 +22,14 @@ export class craftAlgoService {
           })),
         },
       },
-      include: { departments: true, project: true },
+      include: { departments: true },
+    });
+  }
+
+  async getLatestResult(layoutId: string) {
+    return this.databaseService.craftResult.findFirst({
+      where: { layoutId },
+      orderBy: { createdAt: 'desc' },
     });
   }
 }
