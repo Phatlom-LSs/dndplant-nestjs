@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
-import { CreateLayoutDto } from './dto/craft.dto';
+import { CreateLayoutDto } from 'src/CRAFT/dto/craft.dto';
 
 @Injectable()
 export class CraftAlgoService {
