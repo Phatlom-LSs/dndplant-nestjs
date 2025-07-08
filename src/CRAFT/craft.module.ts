@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { craftAlgoService } from './craft.service';
+import { CraftAlgoService } from './craft.service';
 import { layoutController } from './craft.controller';
 
 @Module({
-  providers: [craftAlgoService],
-  exports: [craftAlgoService],
+  providers: [CraftAlgoService],
+  exports: [CraftAlgoService],
   controllers: [layoutController],
 })
 export class craftAlgoModule {}

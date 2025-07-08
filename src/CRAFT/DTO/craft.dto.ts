@@ -9,4 +9,6 @@ export class CreateLayoutDto {
     width: number;
     height: number;
   }>;
+  costMatrix: number[][];
+  metric: 'manhattan' | 'euclidean';
 }
