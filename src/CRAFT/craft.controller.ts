@@ -4,7 +4,7 @@ import { CreateLayoutDto } from './dto/craft.dto';
 
 @Controller('craftLayout')
 export class layoutController {
-  constructor(private readonly layoutService: CraftAlgoService) {}
+  constructor(private layoutService: CraftAlgoService) {}
 
   @Post('layout')
   async createLayout(@Body() dto: CreateLayoutDto) {
