@@ -6,6 +6,13 @@ import { CreateLayoutDto } from './dto/craft.dto';
 export class CraftAlgoService {
   constructor(private databaseService: DatabaseService) {}
 
+  async createProject(name: string, userId: number) {
+    const project = await this.databaseService.project.create({
+      data: { name, userId },
+    });
+    return project;
+  }
+
   async createLayoutDepartments(dto: CreateLayoutDto) {
     // Create layout + departments
     const layout = await this.databaseService.layout.create({

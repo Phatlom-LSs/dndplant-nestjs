@@ -9,7 +9,7 @@ async function bootstrap() {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: process.env.FETCH_API,
+    origin: [process.env.PROD_FETCH_API, process.env.DEV_FETCH_API],
     credentials: true,
   });
 
