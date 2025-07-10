@@ -46,7 +46,10 @@ export class CraftAlgoService {
       },
     });
 
-    return result;
+    return {
+      layoutId: layout.id,
+      result,
+    };
   }
 
   async getLatestResult(layoutId: string) {
