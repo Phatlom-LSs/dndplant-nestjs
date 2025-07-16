@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateLayoutDto } from './dto/craft.dto';
+import { bruteForceLayout } from './brutal-algorithm';
 
 @Injectable()
 export class CraftAlgoService {
@@ -33,22 +34,34 @@ export class CraftAlgoService {
       include: { departments: true },
     });
 
-    // Calculate CRAFT
-    const result = this.calCraft(layout, dto.costMatrix, dto.metric);
+    const { assignment, totalCost } = bruteForceLayout(
+      dto.departments,
+      dto.gridSize,
+      dto.costMatrix,
+      dto.metric,
+    );
 
-    // Save CraftResult
+    for (let i = 0; i < assignment.length; i++) {
+      const depName = assignment[i].name;
+      await this.databaseService.department.updateMany({
+        where: { layoutId: layout.id, name: depName },
+        data: { x: assignment[i].x, y: assignment[i].y },
+      });
+    }
+
     await this.databaseService.craftResult.create({
       data: {
         layoutId: layout.id,
-        totalCost: Math.round(result.totalCost),
-        totalDistance: Math.round(result.totalDistance),
-        resultJson: result,
+        totalCost: Math.round(totalCost),
+        totalDistance: Math.round(totalCost),
+        resultJson: { assignment, totalCost, metric: dto.metric },
       },
     });
 
     return {
       layoutId: layout.id,
-      result,
+      assignment,
+      totalCost,
     };
   }
 
@@ -57,49 +70,5 @@ export class CraftAlgoService {
       where: { layoutId },
       orderBy: { createdAt: 'desc' },
     });
-  }
-
-  calCraft(
-    layout: any,
-    costMatrix: number[][],
-    metric: 'manhattan' | 'euclidean',
-  ) {
-    const depts = layout.departments;
-    let totalCost = 0;
-    let totalDistance = 0;
-
-    for (let i = 0; i < depts.length; i++) {
-      for (let j = 0; j < depts.length; j++) {
-        if (i !== j) {
-          const depA = depts[i];
-          const depB = depts[j];
-          const flow = costMatrix[i][j];
-          let dist;
-          if (metric === 'euclidean') {
-            dist = Math.sqrt(
-              Math.pow(depA.x - depB.x, 2) + Math.pow(depA.y - depB.y, 2)
-            );
-          } else {
-            dist = Math.abs(depA.x - depB.x) + Math.abs(depA.y - depB.y);
-          }
-          totalDistance += dist * flow;
-          totalCost += dist * flow;
-        }
-      }
-    }
-    type Dept = {
-      name: string;
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-    return {
-      totalCost,
-      totalDistance,
-      assignment: depts as Dept[],
-      matrix: costMatrix,
-      metric,
-    };
   }
 }
