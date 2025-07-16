@@ -87,10 +87,17 @@ export class CraftAlgoService {
         }
       }
     }
+    type Dept = {
+      name: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
     return {
       totalCost,
       totalDistance,
-      assignment: depts,
+      assignment: depts as Dept[],
       matrix: costMatrix,
       metric,
     };
