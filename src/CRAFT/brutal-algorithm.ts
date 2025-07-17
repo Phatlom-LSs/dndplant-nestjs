@@ -43,11 +43,24 @@ function calcCost(
 
 export function bruteForceLayout(
   departments: Department[],
-  slots: Position[],
+  gridSize: number,
   flowMatrix: number[][],
   metric: 'manhattan' | 'euclidean',
 ) {
-  const allPermutes = permute(slots);
+  const slots: Position[] = [];
+
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      for (let x = 0; x < gridSize; x++) {
+        slots.push({ x, y });
+      }
+    }
+  }
+
+  if (slots.length < departments.length) throw new Error('Grid too small');
+  const useSlots = slots.slice(0, departments.length);
+
+  const allPermutes = permute(useSlots);
   let minCost = Infinity;
   let bestLayout: (Department & Position)[] = [];
   for (const posSet of allPermutes) {
