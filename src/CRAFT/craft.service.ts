@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateLayoutDto } from './dto/craft.dto';
-import { bruteForceLayout } from './brutal-algorithm';
+import { greedyLayout } from './greedy';
 
 @Injectable()
 export class CraftAlgoService {
@@ -34,7 +34,7 @@ export class CraftAlgoService {
       include: { departments: true },
     });
 
-    const { assignment, totalCost } = bruteForceLayout(
+    const { assignment, totalCost } = greedyLayout(
       dto.departments,
       dto.gridSize,
       dto.costMatrix,
