@@ -5,8 +5,7 @@ type Department = {
 };
 type Position = { x: number; y: number };
 
-// คำนวณ cost ของ layout ปัจจุบัน
-export function calcCost(
+function calcCost(
   layout: (Department & Position)[],
   flowMatrix: number[][],
   metric: 'manhattan' | 'euclidean',
@@ -33,34 +32,51 @@ export function calcCost(
   return total;
 }
 
-// วางทีละแผนกจากซ้ายไปขวา เต็มแถวแล้วขึ้นแถวใหม่
-export function greedyLayout(
+// Greedy Swap Optimization
+export function greedySwapLayout(
   departments: Department[],
   gridSize: number,
   flowMatrix: number[][],
   metric: 'manhattan' | 'euclidean',
+  maxIter: number = 1000,
 ) {
-  let x = 0,
-    y = 0,
-    rowHeight = 0;
+  // Initial layout: วางเรียงกันใน grid
   const layout: (Department & Position)[] = [];
-
+  let cx = 0,
+    cy = 0;
   for (const d of departments) {
-    if (x + d.width > gridSize) {
-      // ขึ้นบรรทัดใหม่
-      x = 0;
-      y += rowHeight;
-      rowHeight = 0;
+    layout.push({ ...d, x: cx, y: cy });
+    cx += d.width;
+    if (cx + d.width > gridSize) {
+      cx = 0;
+      cy++;
     }
-    layout.push({ ...d, x, y });
-    x += d.width;
-    if (d.height > rowHeight) rowHeight = d.height;
   }
 
-  const totalCost = calcCost(layout, flowMatrix, metric);
+  let bestLayout = [...layout];
+  let bestCost = calcCost(bestLayout, flowMatrix, metric);
+
+  // ลองสลับตำแหน่งสองอัน แล้วดู cost
+  for (let iter = 0; iter < maxIter; iter++) {
+    // clone
+    const newLayout = bestLayout.map((d) => ({ ...d }));
+    // สุ่มเลือก index 2 อันมา swap
+    const i = Math.floor(Math.random() * newLayout.length);
+    const j = Math.floor(Math.random() * newLayout.length);
+    if (i === j) continue;
+    // swap position
+    [newLayout[i].x, newLayout[j].x] = [newLayout[j].x, newLayout[i].x];
+    [newLayout[i].y, newLayout[j].y] = [newLayout[j].y, newLayout[i].y];
+
+    const newCost = calcCost(newLayout, flowMatrix, metric);
+    if (newCost < bestCost) {
+      bestCost = newCost;
+      bestLayout = newLayout;
+    }
+  }
 
   return {
-    assignment: layout,
-    totalCost,
+    assignment: bestLayout,
+    totalCost: bestCost,
   };
 }
