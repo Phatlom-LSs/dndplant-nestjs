@@ -1,4 +1,3 @@
-// src/CRAFT/craft-brute-force.ts
 type Department = {
   name: string;
   width: number;
@@ -48,22 +47,10 @@ export function bruteForceLayout(
   flowMatrix: number[][],
   metric: 'manhattan' | 'euclidean',
 ) {
-  // กำหนดตำแหน่งเป็นตาราง เช่น [0,0],[1,0],[2,0],... ทีละจุด (แนว row-major)
-  const possiblePositions: Position[] = [];
-  for (let y = 0; y < gridSize; y++) {
-    for (let x = 0; x < gridSize; x++) {
-      possiblePositions.push({ x, y });
-    }
-  }
-
-  // ตำแหน่งต้องพอกับจำนวนแผนก (เอาแค่ n อันแรก)
-  const N = departments.length;
-  const allPositionPermutes = permute(possiblePositions).slice(0, factorial(N)); // จำกัดแค่ n! ชุดแรก
-
+  const allPermutes = permute(slots);
   let minCost = Infinity;
   let bestLayout: (Department & Position)[] = [];
-
-  for (const posSet of allPositionPermutes) {
+  for (const posSet of allPermutes) {
     const candidate = departments.map((d, i) => ({
       ...d,
       x: posSet[i].x,
@@ -75,15 +62,8 @@ export function bruteForceLayout(
       bestLayout = candidate;
     }
   }
-
   return {
     assignment: bestLayout,
     totalCost: minCost,
   };
-}
-
-// Util: Factorial
-function factorial(n: number): number {
-  if (n <= 1) return 1;
-  return n * factorial(n - 1);
 }
