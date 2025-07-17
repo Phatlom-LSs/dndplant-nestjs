@@ -43,7 +43,7 @@ function calcCost(
 
 export function bruteForceLayout(
   departments: Department[],
-  gridSize: number,
+  slots: Position[],
   flowMatrix: number[][],
   metric: 'manhattan' | 'euclidean',
 ) {
