@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateLayoutDto } from './dto/craft.dto';
-import { greedyLayout } from './greedy';
+import { greedySwapLayout } from './greedy';
 
 @Injectable()
 export class CraftAlgoService {
@@ -34,7 +34,7 @@ export class CraftAlgoService {
       include: { departments: true },
     });
 
-    const { assignment, totalCost } = greedyLayout(
+    const { assignment, totalCost } = greedySwapLayout(
       dto.departments,
       dto.gridSize,
       dto.costMatrix,
