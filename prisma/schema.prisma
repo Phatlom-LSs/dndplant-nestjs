@@ -36,6 +36,11 @@ model Layout {
   createdAt   DateTime         @default(now())
 }
 
+enum DepartmentType {
+  DEPT
+  VOID
+}
+
 model Department {
   id        String   @id @default(uuid())
   name      String
@@ -43,6 +48,8 @@ model Department {
   y         Int
   width     Int
   height    Int
+  type      DepartmentType @default(DEPT)
+  locked    Boolean @default(false)
   layout    Layout   @relation(fields: [layoutId], references: [id])
   layoutId  String
 }
@@ -53,6 +60,6 @@ model CraftResult {
   layoutId    String
   totalCost   Int
   totalDistance Int
-  resultJson  Json      // เก็บ assignment, matrix ฯลฯ
+  resultJson  Json
   createdAt   DateTime  @default(now())
 }

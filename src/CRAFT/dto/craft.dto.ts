@@ -24,9 +24,11 @@ export class CreateLayoutDto {
     y: number;
     width: number;
     height: number;
+    type: 'dept' | 'void';
+    locked: boolean;
   }>;
   @IsArray()
-  costMatrix: number[][];
+  costMatrix: (number | string)[][];
 
   @IsEnum(['manhattan', 'euclidean'])
   metric: 'manhattan' | 'euclidean';
