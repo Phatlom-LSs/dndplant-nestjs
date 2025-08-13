@@ -1,35 +1,78 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsString,
+  Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export enum Metric {
+  MANHATTAN = 'manhattan',
+  EUCLIDEAN = 'euclidean',
+}
+
+export enum DepartmentKind {
+  DEPT = 'dept',
+  VOID = 'void',
+}
+
+export class DepartmentDto {
+  @IsString()
+  name!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  x!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  y!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  width!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  height!: number;
+
+  @IsEnum(DepartmentKind)
+  type!: DepartmentKind; // 'dept' | 'void'
+
+  @IsBoolean()
+  @Type(() => Boolean)
+  locked!: boolean;
+}
 
 export class CreateLayoutDto {
   @IsString()
-  name: string;
+  name!: string;
 
+  @Type(() => Number)
   @IsInt()
-  gridSize: number;
+  @Min(1)
+  gridSize!: number;
 
   @IsString()
-  projectId: string;
+  projectId!: string;
 
   @IsArray()
   @ArrayMinSize(1)
-  departments: Array<{
-    name: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    type: 'dept' | 'void';
-    locked: boolean;
-  }>;
-  @IsArray()
-  costMatrix: (number | string)[][];
+  @ValidateNested({ each: true })
+  @Type(() => DepartmentDto)
+  departments!: DepartmentDto[];
 
-  @IsEnum(['manhattan', 'euclidean'])
-  metric: 'manhattan' | 'euclidean';
+  @IsArray()
+  costMatrix!: (number | string)[][];
+
+  @IsEnum(Metric)
+  metric!: Metric;
 }

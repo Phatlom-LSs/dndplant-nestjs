@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
-import { CreateLayoutDto, DepartmentDto, Metric } from './dto/craft.dto';
-import { greedySwapLayout } from './greedy';
+import { CreateLayoutDto, Metric } from './dto/craft.dto';
 
 type DeptType = 'dept' | 'void';
 
@@ -25,6 +24,9 @@ const LETTER_WEIGHTS: Record<string, number> = {
   O: 4,
   U: 2,
   X: 0,
+  B: 9,
+  C: 7,
+  D: 5,
 };
 
 @Injectable()
@@ -32,10 +34,7 @@ export class CraftAlgoService {
   constructor(private databaseService: DatabaseService) {}
 
   async createProject(name: string, userId: number) {
-    const project = await this.databaseService.project.create({
-      data: { name, userId },
-    });
-    return project;
+    return this.databaseService.project.create({ data: { name, userId } });
   }
 
   async createLayoutDepartments(dto: CreateLayoutDto) {
@@ -44,15 +43,18 @@ export class CraftAlgoService {
     }
 
     const gridSize = dto.gridSize;
-    const depts = dto.departments.map((d) => ({
+
+    // normalize dept
+    const depts: Department[] = dto.departments.map((d) => ({
       ...d,
       type: (d.type ?? 'dept') as DeptType,
       locked: !!d.locked,
     }));
 
+    // map closeness letters -> numeric
     const costMatrix = this.toNumericCostMatrix(dto.costMatrix, depts);
 
-    // Create layout + departments
+    // create base layout + children
     const layout = await this.databaseService.layout.create({
       data: {
         name: dto.name,
@@ -65,27 +67,28 @@ export class CraftAlgoService {
             y: dep.y,
             width: dep.width,
             height: dep.height,
-            type: d.type === 'void' ? 'VOID' : 'DEPT',
-            locked: !!d.locked,
+            type: dep.type === 'void' ? 'VOID' : 'DEPT',
+            locked: !!dep.locked,
           })),
         },
       },
       include: { departments: true },
     });
 
+    // === ใช้ตัว optimizer ที่รองรับ locked/void ===
     const { assignment, totalCost } = this.optimizeWithLocked(
       depts,
       gridSize,
       costMatrix,
-      dto.metric,
-      1200, // max iterations (ปรับได้)
+      dto.metric as Metric,
+      1200, // max iterations ปรับได้
     );
 
-    for (let i = 0; i < assignment.length; i++) {
-      const depName = assignment[i].name;
+    // อัปเดตตำแหน่งใน DB (อยากข้าม locked ก็เช็คแล้วค่อยอัปเดต)
+    for (const a of assignment) {
       await this.databaseService.department.updateMany({
-        where: { layoutId: layout.id, name: depName },
-        data: { x: assignment[i].x, y: assignment[i].y },
+        where: { layoutId: layout.id, name: a.name },
+        data: { x: a.x, y: a.y },
       });
     }
 
@@ -111,6 +114,8 @@ export class CraftAlgoService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  // ------- helpers -------
   private toNumericCostMatrix(
     input: (number | string)[][],
     depts: Department[],
@@ -120,7 +125,8 @@ export class CraftAlgoService {
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         const v = input?.[i]?.[j] ?? 0;
-        const isVoidPair = (depts[i]?.type === 'void') || (depts[j]?.type === 'void');
+        const isVoidPair =
+          depts[i]?.type === 'void' || depts[j]?.type === 'void';
         if (isVoidPair) {
           out[i][j] = 0;
         } else if (typeof v === 'number') {
@@ -153,40 +159,54 @@ export class CraftAlgoService {
 
         const dx = Math.abs(a.x - b.x);
         const dy = Math.abs(a.y - b.y);
-        const dist = metric === 'euclidean' ? Math.sqrt(dx * dx + dy * dy) : (dx + dy);
+        const dist =
+          metric === 'euclidean' ? Math.sqrt(dx * dx + dy * dy) : dx + dy;
         total += dist * f;
       }
     }
     return total;
   }
 
-  // ---------- PACKING respecting locked ----------
+  // ----- packing (respect locked) -----
   private packRespectLocked(
     orderMovables: Department[],
     locked: Department[],
     gridSize: number,
   ): Assignment {
-    // ตี grid occupancy
     const occ: boolean[][] = Array.from({ length: gridSize }, () =>
       Array<boolean>(gridSize).fill(false),
     );
 
-    // mark locked occupied
     const lockPlaced: Assignment = locked.map((d) => {
       this.mark(occ, d.x, d.y, d.width, d.height, gridSize, true);
-      return { ...d, type: (d.type ?? 'dept') as DeptType, locked: !!d.locked };
+      return {
+        ...d,
+        type: (d.type ?? 'dept') as DeptType,
+        locked: !!d.locked,
+      };
     });
 
-    // place movables first-fit (row-major) ข้ามพื้นที่ที่ชนกับ locked
     const moves: Assignment = [];
     for (const d of orderMovables) {
       const p = this.findFirstFit(occ, d.width, d.height, gridSize);
       if (!p) {
-        // ถ้าไม่มีที่ลง อาจ fallback วางทับค่าเดิม (ป้องกัน error ระเบิด)
-        moves.push({ ...d, x: d.x, y: d.y, type: (d.type ?? 'dept') as DeptType, locked: !!d.locked });
+        // fallback: วางที่เดิม
+        moves.push({
+          ...d,
+          x: d.x,
+          y: d.y,
+          type: (d.type ?? 'dept') as DeptType,
+          locked: !!d.locked,
+        });
       } else {
         this.mark(occ, p.x, p.y, d.width, d.height, gridSize, true);
-        moves.push({ ...d, x: p.x, y: p.y, type: (d.type ?? 'dept') as DeptType, locked: !!d.locked });
+        moves.push({
+          ...d,
+          x: p.x,
+          y: p.y,
+          type: (d.type ?? 'dept') as DeptType,
+          locked: !!d.locked,
+        });
       }
     }
 
@@ -214,7 +234,15 @@ export class CraftAlgoService {
     }
     return true;
   }
-  private mark(occ: boolean[][], x: number, y: number, w: number, h: number, grid: number, v: boolean) {
+  private mark(
+    occ: boolean[][],
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    grid: number,
+    v: boolean,
+  ) {
     for (let yy = y; yy < Math.min(grid, y + h); yy++) {
       for (let xx = x; xx < Math.min(grid, x + w); xx++) {
         occ[yy][xx] = v;
@@ -222,7 +250,7 @@ export class CraftAlgoService {
     }
   }
 
-  // ---------- OPTIMIZER (greedy random swap + respect locked/void) ----------
+  // ----- optimizer (random-swap order + pack, respect locked/void) -----
   private optimizeWithLocked(
     depts: Department[],
     gridSize: number,
@@ -236,10 +264,8 @@ export class CraftAlgoService {
     const nameToIndex = new Map<string, number>();
     depts.forEach((d, i) => nameToIndex.set(d.name, i));
 
-    // เริ่มจาก order movables ตาม input เดิม
     let order = [...movables];
 
-    // แพ็คครั้งแรก
     let bestAssign = this.packRespectLocked(order, locked, gridSize);
     let bestCost = this.calcCost(bestAssign, nameToIndex, flow, metric);
 
@@ -262,7 +288,6 @@ export class CraftAlgoService {
       }
     }
 
-    // จัดรูปแบบ output (ensure every dept has type/locked)
     const normalized: Assignment = bestAssign.map((d) => ({
       ...d,
       type: (d.type ?? 'dept') as DeptType,
