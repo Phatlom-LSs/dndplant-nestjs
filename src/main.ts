@@ -21,7 +21,7 @@ async function bootstrap() {
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
-    credential: true,
+    credentials: true,
     maxAge: 600,
   });
 
@@ -32,11 +32,7 @@ async function bootstrap() {
         'Access-Control-Allow-Methods',
         'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       );
-      res.header(
-        'Access-Control-Allow-Headers',
-        'Content-Type',
-        'Authorization',
-      );
+      res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
       return res.sendStatus(204);
     }
     next();
