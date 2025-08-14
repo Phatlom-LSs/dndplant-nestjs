@@ -71,7 +71,10 @@ export class CreateLayoutDto {
   departments!: DepartmentDto[];
 
   @IsArray()
-  costMatrix!: (number | string)[][];
+  flowMatrix: number[][];
+
+  @IsArray()
+  closenessMatrix: ('' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X')[][];
 
   @IsEnum(Metric)
   metric!: Metric;
