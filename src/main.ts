@@ -16,7 +16,7 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-      if (FRONT_ORIGIN.includes(origin)) return callback (null, true);
+      if (FRONT_ORIGIN.includes(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -30,13 +30,17 @@ async function bootstrap() {
     if (req.header === 'Options') {
       res.header(
         'Access-Control-Allow-Methods',
-        'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+        'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       );
-      res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      res.header(
+        'Access-Control-Allow-Headers',
+        'Content-Type',
+        'Authorization',
+      );
       return res.sendStatus(204);
     }
     next();
-  })
+  });
   await app.listen(process.env.PORT || 4000);
 }
 bootstrap();
