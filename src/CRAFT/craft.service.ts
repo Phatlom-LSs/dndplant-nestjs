@@ -182,6 +182,7 @@ export class CraftAlgoService {
     }
     return total;
   }
+  
 
   // ---------- packing (respect locked) ----------
   private packRespectLocked(

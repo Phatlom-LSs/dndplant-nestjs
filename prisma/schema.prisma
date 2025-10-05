@@ -29,10 +29,14 @@ model Layout {
   id          String           @id @default(uuid())
   name        String
   gridSize    Int
+  gridWidth     Int        @default(0)
+  gridHeight    Int        @default(0)
   project     Project          @relation(fields: [projectId], references: [id])
   projectId   String
   departments Department[]
   craftResults CraftResult[]
+  corelapInput  CorelapInput?
+  obstacles     Obstacle[]
   createdAt   DateTime         @default(now())
 }
 
@@ -44,10 +48,10 @@ enum DepartmentType {
 model Department {
   id        String   @id @default(uuid())
   name      String
-  x         Int
-  y         Int
-  width     Int
-  height    Int
+  x         Int?
+  y         Int?
+  width     Int?
+  height    Int?
   type      DepartmentType @default(DEPT)
   locked    Boolean @default(false)
   layout    Layout   @relation(fields: [layoutId], references: [id])

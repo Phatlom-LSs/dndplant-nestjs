@@ -54,7 +54,7 @@ export class DepartmentDto {
 
 export class CreateLayoutDto {
   @IsString()
-  name!: string;
+  name!: string; 
 
   @Type(() => Number)
   @IsInt()
@@ -74,6 +74,7 @@ export class CreateLayoutDto {
   flowMatrix: number[][];
 
   @IsArray()
+
   closenessMatrix: ('' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X')[][];
 
   @IsEnum(Metric)
