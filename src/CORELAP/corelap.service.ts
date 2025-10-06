@@ -204,7 +204,15 @@ export class CorelapService {
   private seedOrder(
     closeness: ClosenessRating[][],
     seedRule: 'maxDegree' | 'maxArea' | 'random' | undefined,
-    sized: { name: string; width: number; height: number; idx: number }[],
+    sized: {
+      name: string;
+      width: number;
+      height: number;
+      idx: number;
+      fixed?: boolean;
+      x?: number;
+      y?: number;
+    }[],
   ) {
     const n = sized.length;
 
