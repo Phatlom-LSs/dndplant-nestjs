@@ -4,7 +4,7 @@ import {
   DepartmentKind,
   ClosenessRating,
   ClosenessWeightsDto,
-} from './dto/create-corelap.dto';
+} from './dto/corelap.dto';
 
 type Placement = { name: string; x: number; y: number; width: number; height: number };
 

@@ -4,7 +4,7 @@ import {
   CreateCorelapDto,
   DepartmentKind,
   ClosenessWeightsDto,
-} from './dto/create-corelap.dto';
+} from './dto/corelap.dto';
 
 @Controller('corelap')
 export class CorelapController {
