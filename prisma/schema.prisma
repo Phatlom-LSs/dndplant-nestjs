@@ -35,8 +35,8 @@ model Layout {
   projectId   String
   departments Department[]
   craftResults CraftResult[]
-  corelapInput  CorelapInput?
-  obstacles     Obstacle[]
+  corelapInput  Json?
+  obstacles     Json?
   createdAt   DateTime         @default(now())
 }
 
