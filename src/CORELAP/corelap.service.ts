@@ -1,183 +1,108 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { DatabaseService } from 'src/database/database.service';
-import {
-  CreateCorelapDto,
-  DepartmentKind,
-  ClosenessRating,
-  ClosenessWeightsDto,
-} from './dto/corelap.dto';
+// src/CORELAP/corelap.service.ts
+import { Injectable } from '@nestjs/common';
+import { CreateCorelapDto } from './dto/corelap.dto';
 
-type Placement = { name: string; x: number; y: number; width: number; height: number };
+type Weights = {
+  A: number;
+  E: number;
+  I: number;
+  O: number;
+  U: number;
+  X: number;
+  blank: number;
+};
+type DeptNode = {
+  idx: number;
+  name: string;
+  cells: number; // จำนวนช่องทั้งหมดของแผนก
+  remaining: number; // ช่องที่ยังไม่ได้วาง
+  fixed: boolean;
+};
+
+type Rect = {
+  name: string;
+  idx: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type GenerateOptions = {
+  allowSplitting: boolean;
+  maxFragmentsPerDept: number; // default 3
+  cellSizeMeters: number; // informational
+};
 
 @Injectable()
 export class CorelapService {
-  constructor(private readonly db: DatabaseService) {}
+  // แปลงตัวอักษร closeness เป็นน้ำหนัก
+  private w(letter: string, W: Weights) {
+    const k = (letter || '').toUpperCase() as keyof Weights;
+    return (W[k] ?? 0) as number;
+  }
 
-  async generate(dto: CreateCorelapDto) {
-    // 1) Ensure project exists
-    const proj = await this.db.project.findUnique({
-      where: { id: dto.projectId },
-      select: { id: true },
-    });
-    if (!proj) throw new BadRequestException('project not found');
+  private numericMatrix(letters: string[][], W: Weights): number[][] {
+    const n = letters.length;
+    const M = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const v = (letters?.[i]?.[j] ?? '').toString().trim().toUpperCase();
+        M[i][j] = this.w(v as any, W);
+      }
+      // บังคับเส้นทแยงเป็น X
+      M[i][i] = this.w('X', W);
+    }
+    return M;
+  }
 
-    // 2) Keep only real departments (matrix is over DEPT only)
-    const realDepts = dto.departments.filter((d) => d.type === DepartmentKind.DEPT);
-    const n = realDepts.length;
-    this.assertSquareMatrix(dto.closenessMatrix, n);
+  private tcr(i: number, M: number[][]) {
+    // TCR แบบ classic = sum ของแถว (หรือแถว+คอลัมน์ถ้าไม่สมมาตร)
+    let s = 0;
+    for (let j = 0; j < M.length; j++) s += M[i][j];
+    return s;
+  }
 
-    // map original index by name (to read matrix after reordering)
-    const originalIndexByName = new Map<string, number>(
-      realDepts.map((d, idx) => [d.name, idx]),
+  private ccr(i: number, placed: Set<number>, M: number[][]) {
+    let s = 0;
+    placed.forEach((j) => (s += M[i][j]));
+    return s;
+  }
+
+  // ผลรวมความยาวผนังที่สัมผัสกัน (เฉพาะติดขอบ ไม่คิด corner)
+  private sharedEdgeLen(a: Rect, b: Rect): number {
+    // ถ้าชนด้านซ้าย/ขวา
+    const touchLR = a.x + a.width === b.x || b.x + b.width === a.x;
+    const yOverlap = Math.max(
+      0,
+      Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y),
     );
 
-    // 3) Normalize weights
-    const W = this.normalizeWeights(dto.closenessWeights);
+    // ถ้าชนด้านบน/ล่าง
+    const touchTB = a.y + a.height === b.y || b.y + b.height === a.y;
+    const xOverlap = Math.max(
+      0,
+      Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x),
+    );
 
-    // 4) Ensure sizes (width/height) from area if missing
-    const sized = realDepts.map((d, idx) => {
-      const { width, height } = this.ensureSize(
-        d.width,
-        d.height,
-        d.area,
-        d.minAspectRatio,
-        d.maxAspectRatio,
-      );
-      return {
-        idx, // original index for closeness matrix
-        name: d.name,
-        width,
-        height,
-        fixed: !!d.fixed,
-        x: d.x,
-        y: d.y,
-      };
-    });
-
-    // 5) Place items on grid (fixed first, then seeded order)
-    const placements = this.place(dto, sized);
-
-    // 6) Score result (uses originalIndexByName to read matrix correctly)
-    const score = this.scoreCloseness(placements, dto.closenessMatrix, W, originalIndexByName);
-
-    // 7) Return in FE-friendly shape
-    return {
-      candidates: [
-        {
-          placements,
-          score: { total: score, closeness: score },
-        },
-      ],
-    };
+    const verticalShare = touchLR ? yOverlap : 0;
+    const horizontalShare = touchTB ? xOverlap : 0;
+    return verticalShare + horizontalShare;
   }
 
-  // --- validations/helpers ----------------------------------------------------
-
-  private assertSquareMatrix(matrix: ClosenessRating[][], n: number) {
-    if (!Array.isArray(matrix) || matrix.length !== n) {
-      throw new BadRequestException(`closenessMatrix must be ${n}x${n}`);
-    }
-    for (let i = 0; i < n; i++) {
-      if (!Array.isArray(matrix[i]) || matrix[i].length !== n) {
-        throw new BadRequestException(`closenessMatrix row ${i} must have length ${n}`);
-      }
-    }
-  }
-
-  private normalizeWeights(w?: ClosenessWeightsDto): Record<string, number> {
-    const def = new ClosenessWeightsDto();
-    return {
-      A: w?.A ?? def.A,
-      E: w?.E ?? def.E,
-      I: w?.I ?? def.I,
-      O: w?.O ?? def.O,
-      U: w?.U ?? def.U,
-      X: w?.X ?? def.X,
-      blank: w?.blank ?? def.blank,
-    };
-  }
-
-  // Try to satisfy area and aspect-ratio (roughly) if width/height missing
-  private ensureSize(
-    width?: number,
-    height?: number,
-    area?: number,
-    minAR?: number,
-    maxAR?: number,
-  ): { width: number; height: number } {
-    if (width && height) return { width, height };
-    const a = Math.max(1, area ?? 9);
-    let w = Math.ceil(Math.sqrt(a));
-    let h = Math.ceil(a / w);
-    const ar = w / h;
-    if (minAR && ar < minAR) w = Math.ceil(h * minAR);
-    if (maxAR && ar > maxAR) h = Math.ceil(w / (maxAR || 1));
-    return { width: w, height: h };
-  }
-
-  private place(
-    dto: CreateCorelapDto,
-    sized: { idx: number; name: string; width: number; height: number; fixed: boolean; x?: number; y?: number }[],
-  ): Placement[] {
-    const gridW = dto.gridWidth;
-    const gridH = dto.gridHeight;
-
-    // occupancy grid
-    const occ: boolean[][] = Array.from({ length: gridH }, () => Array<boolean>(gridW).fill(false));
-
-    // mark obstacles
-    for (const ob of dto.obstacles ?? []) {
-      for (let yy = ob.y; yy < Math.min(gridH, ob.y + ob.height); yy++) {
-        for (let xx = ob.x; xx < Math.min(gridW, ob.x + ob.width); xx++) {
-          occ[yy][xx] = true;
-        }
-      }
-    }
-
-    const out: Placement[] = [];
-
-    // place fixed first
-    for (const d of sized.filter((s) => s.fixed)) {
-      if (d.x == null || d.y == null) {
-        throw new BadRequestException(`Fixed dept "${d.name}" requires x,y`);
-      }
-      if (d.x + d.width > gridW || d.y + d.height > gridH) {
-        throw new BadRequestException(`Fixed dept "${d.name}" out of bounds`);
-      }
-      if (!this.fits(occ, d.x, d.y, d.width, d.height)) {
-        throw new BadRequestException(`Fixed dept "${d.name}" overlaps obstacle/other`);
-      }
-      this.mark(occ, d.x, d.y, d.width, d.height, gridW, gridH, true);
-      out.push({ name: d.name, x: d.x, y: d.y, width: d.width, height: d.height });
-    }
-
-    // order remaining by seed rule
-    const order = this.seedOrder(dto.closenessMatrix, dto.seedRule, sized);
-
-    // place non-fixed
-    for (const d of order.filter((s) => !s.fixed)) {
-      const p = this.firstFit(occ, d.width, d.height, gridW, gridH);
-      if (!p) throw new BadRequestException(`Grid too small to place "${d.name}"`);
-      this.mark(occ, p.x, p.y, d.width, d.height, gridW, gridH, true);
-      out.push({ name: d.name, x: p.x, y: p.y, width: d.width, height: d.height });
-    }
-
-    return out;
-  }
-
-  private firstFit(occ: boolean[][], w: number, h: number, gridW: number, gridH: number) {
-    for (let y = 0; y + h <= gridH; y++) {
-      for (let x = 0; x + w <= gridW; x++) {
-        if (this.fits(occ, x, y, w, h)) return { x, y };
-      }
-    }
-    return null;
-  }
-
-  private fits(occ: boolean[][], x: number, y: number, w: number, h: number) {
+  private fits(
+    occ: boolean[][],
+    W: number,
+    H: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ) {
+    if (x < 0 || y < 0 || x + w > W || y + h > H) return false;
     for (let yy = y; yy < y + h; yy++) {
       for (let xx = x; xx < x + w; xx++) {
-        if (occ[yy]?.[xx]) return false;
+        if (occ[yy][xx]) return false;
       }
     }
     return true;
@@ -189,81 +114,342 @@ export class CorelapService {
     y: number,
     w: number,
     h: number,
-    gridW: number,
-    gridH: number,
     v: boolean,
   ) {
-    for (let yy = y; yy < Math.min(gridH, y + h); yy++) {
-      for (let xx = x; xx < Math.min(gridW, x + w); xx++) {
+    for (let yy = y; yy < y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) {
         occ[yy][xx] = v;
       }
     }
   }
 
-  // Seeding rule for build order
-  private seedOrder(
-    closeness: ClosenessRating[][],
-    seedRule: 'maxDegree' | 'maxArea' | 'random' | undefined,
-    sized: {
-      name: string;
-      width: number;
-      height: number;
-      idx: number;
-      fixed?: boolean;
-      x?: number;
-      y?: number;
-    }[],
-  ) {
-    const n = sized.length;
-
-    // Count non-blank closeness entries for row i
-    const degree = (i: number): number =>
-      Array.from({ length: n }).reduce<number>((acc, _unused, j) => {
-        const c = (closeness[i]?.[j] ?? '') as string;
-        return acc + (c ? 1 : 0);
-      }, 0); // <-- initial 0 + generic fixes TS "unknown"
-
-    if (seedRule === 'maxArea') {
-      return [...sized].sort((a, b) => b.width * b.height - a.width * a.height);
+  private factorPairs(
+    n: number,
+    maxW: number,
+    maxH: number,
+  ): Array<{ w: number; h: number }> {
+    // คืนคู่ (w,h) ที่ w*h = n และไม่เกินขนาดกริด
+    const out: Array<{ w: number; h: number }> = [];
+    for (let w = 1; w <= Math.min(n, maxW); w++) {
+      if (n % w !== 0) continue;
+      const h = n / w;
+      if (h <= maxH) out.push({ w, h });
     }
-    if (seedRule === 'random') {
-      return [...sized].sort(() => Math.random() - 0.5);
-    }
-    // default: maxDegree
-    return [...sized].sort((a, b) => degree(b.idx) - degree(a.idx));
+    // ใกล้จัตุรัสมาก่อน
+    out.sort((a, b) => Math.abs(a.w - a.h) - Math.abs(b.w - b.h));
+    return out;
   }
 
-  private center(p: Placement) {
-    return { cx: p.x + p.width / 2, cy: p.y + p.height / 2 };
-  }
+  private bestPlacementForPiece(
+    pieceCells: number,
+    deptIdx: number,
+    occ: boolean[][],
+    placedRects: Rect[],
+    M: number[][],
+    W: number,
+    H: number,
+  ): Rect | null {
+    const candidates = this.factorPairs(pieceCells, W, H);
+    if (!candidates.length) return null;
 
-  private scoreCloseness(
-    placements: Placement[],
-    closeness: ClosenessRating[][],
-    W: Record<string, number>,
-    originalIndexByName: Map<string, number>,
-  ): number {
-    let s = 0;
-    for (let i = 0; i < placements.length; i++) {
-      for (let j = i + 1; j < placements.length; j++) {
-        const pi = placements[i];
-        const pj = placements[j];
+    let best: { score: number; rect: Rect } | null = null;
 
-        // Map names to *original* closeness indices
-        const ci = originalIndexByName.get(pi.name);
-        const cj = originalIndexByName.get(pj.name);
-        if (ci == null || cj == null) continue;
+    for (const { w, h } of candidates) {
+      // สแกนทั้งกริด (ง่ายและเสถียร) – ถ้ากริดใหญ่มากค่อย optimize ภายหลัง
+      for (let y = 0; y + h <= H; y++) {
+        for (let x = 0; x + w <= W; x++) {
+          if (!this.fits(occ, W, H, x, y, w, h)) continue;
 
-        const letter = (closeness[ci]?.[cj] as string) || '';
-        const w = W[letter] ?? W.blank;
-        if (w === 0) continue;
+          const candidate: Rect = {
+            name: '',
+            idx: deptIdx,
+            x,
+            y,
+            width: w,
+            height: h,
+          };
+          // PR = ผลรวม (sharedEdgeLen * weight)
+          let pr = 0;
+          for (const r of placedRects) {
+            const len = this.sharedEdgeLen(candidate, r);
+            if (len > 0) pr += len * M[deptIdx][r.idx];
+          }
 
-        const { cx: x1, cy: y1 } = this.center(pi);
-        const { cx: x2, cy: y2 } = this.center(pj);
-        const dist = Math.abs(x1 - x2) + Math.abs(y1 - y2); // Manhattan on centers
-        s += w / (1 + dist);
+          // ผูกบางอย่างให้ติด cluster (เล็ก ๆ) – ให้โบนัสถ้าติดอย่างน้อยหนึ่งชิ้น
+          const touchBonus = placedRects.some(
+            (r) => this.sharedEdgeLen(candidate, r) > 0,
+          )
+            ? 0.1
+            : 0;
+
+          const score = pr + touchBonus;
+
+          if (!best || score > best.score) {
+            best = { score, rect: candidate };
+          }
+        }
       }
     }
-    return Math.round(s * 100) / 100;
+    return best ? best.rect : null;
+  }
+
+  generate(dto: CreateCorelapDto, opts: GenerateOptions) {
+    const W: Weights = {
+      A: dto.closenessWeights?.A ?? 10,
+      E: dto.closenessWeights?.E ?? 8,
+      I: dto.closenessWeights?.I ?? 6,
+      O: dto.closenessWeights?.O ?? 4,
+      U: dto.closenessWeights?.U ?? 2,
+      X: dto.closenessWeights?.X ?? 0,
+      blank: dto.closenessWeights?.blank ?? 0,
+    };
+
+    const gridW = dto.gridWidth;
+    const gridH = dto.gridHeight;
+
+    // เตรียม dept list
+    const nodes: DeptNode[] = (dto.departments || []).map((d, i) => ({
+      idx: i,
+      name: d.name,
+      cells: Math.max(0, Math.floor(d.area ?? 0)),
+      remaining: Math.max(0, Math.floor(d.area ?? 0)),
+      fixed: !!d.fixed,
+    }));
+
+    // ตรวจความจุ
+    const capacity = gridW * gridH;
+    const required = nodes.reduce((s, n) => s + n.cells, 0);
+    if (required > capacity) {
+      return {
+        error: `Cells required (${required}) exceed grid capacity (${capacity})`,
+        grid: {
+          width: gridW,
+          height: gridH,
+          cellSizeMeters: opts.cellSizeMeters,
+        },
+      };
+    }
+
+    const names = nodes.map((n) => n.name);
+    // สร้าง matrix น้ำหนัก
+    const M = this.numericMatrix(dto.closenessMatrix as any, W);
+
+    // --- ขั้น TCR + seed
+    const tcrs = nodes.map((n) => this.tcr(n.idx, M));
+    let seedIdx = 0;
+    let maxTCR = -Infinity;
+    nodes.forEach((n) => {
+      if (tcrs[n.idx] > maxTCR) {
+        maxTCR = tcrs[n.idx];
+        seedIdx = n.idx;
+      } else if (tcrs[n.idx] === maxTCR) {
+        // tie-break: ใคร cells มากกว่า
+        if (n.cells > nodes[seedIdx].cells) seedIdx = n.idx;
+      }
+    });
+
+    // occupancy
+    const occ: boolean[][] = Array.from({ length: gridH }, () =>
+      Array<boolean>(gridW).fill(false),
+    );
+    const placements: Rect[] = [];
+    const placedSet = new Set<number>();
+    const fragmentsCount = new Map<number, number>(); // deptIdx -> จำนวนชิ้นที่วางแล้ว
+
+    // วาง seed: เริ่มพยายามวางเป็นก้อนเดียวก่อน ถ้าฟิตไม่ได้ค่อยแตก
+    const placeSeed = () => {
+      const target = nodes[seedIdx];
+      const maxFrag = Math.max(1, opts.maxFragmentsPerDept || 1);
+      const tryCells = (cells: number) =>
+        this.bestPlacementForPiece(
+          cells,
+          seedIdx,
+          occ,
+          placements,
+          M,
+          gridW,
+          gridH,
+        );
+
+      // พยายามวางเต็มก้อนก่อน
+      let rect = tryCells(target.remaining);
+      if (!rect && opts.allowSplitting) {
+        // แตกเป็นชิ้นเล็กลงเรื่อย ๆ
+        const chunk = Math.max(1, Math.ceil(target.cells / maxFrag));
+        let cells = Math.min(chunk, target.remaining);
+        while (!rect && cells > 0) {
+          rect = tryCells(cells);
+          if (!rect) cells--; // ลดลงทีละ 1 จนกว่าจะฟิต
+        }
+      }
+      if (!rect) {
+        // fallback: วาง 1 ช่องที่แรกที่เจอ
+        for (let y = 0; y < gridH; y++) {
+          for (let x = 0; x < gridW; x++) {
+            if (!occ[y][x]) {
+              rect = {
+                name: target.name,
+                idx: seedIdx,
+                x,
+                y,
+                width: 1,
+                height: 1,
+              };
+              break;
+            }
+          }
+          if (rect) break;
+        }
+      }
+      if (!rect) return false;
+
+      this.mark(occ, rect.x, rect.y, rect.width, rect.height, true);
+      rect.name = target.name;
+      placements.push(rect);
+      target.remaining -= rect.width * rect.height;
+      placedSet.add(seedIdx);
+      fragmentsCount.set(seedIdx, 1);
+      return true;
+    };
+
+    if (!placeSeed()) {
+      return {
+        error: 'Cannot place seed department',
+        tcrs,
+        grid: { width: gridW, height: gridH },
+      };
+    }
+
+    // --- ไล่ตาม CCR + split ได้
+    // วนจนทุกแผนกวางครบทุก cells
+    const departmentOrder: string[] = [nodes[seedIdx].name];
+
+    while (nodes.some((n) => n.remaining > 0)) {
+      // เลือก dept ถัดไป: CCR สูงสุดกับชุดที่วางแล้ว
+      let nextIdx = -1;
+      let bestCcr = -Infinity;
+      for (const n of nodes) {
+        if (n.remaining <= 0) continue;
+        const c = this.ccr(n.idx, placedSet, M);
+        if (c > bestCcr) {
+          bestCcr = c;
+          nextIdx = n.idx;
+        } else if (c === bestCcr) {
+          // tie-break: TCR, แล้วค่อย area
+          if (tcrs[n.idx] > tcrs[nextIdx]) nextIdx = n.idx;
+          else if (
+            tcrs[n.idx] === tcrs[nextIdx] &&
+            n.cells > nodes[nextIdx].cells
+          )
+            nextIdx = n.idx;
+        }
+      }
+
+      const target = nodes[nextIdx];
+      if (nextIdx === -1 || !target) break;
+
+      // ขนาด chunk ต่อชิ้นถ้า split ได้
+      const maxFrag = Math.max(1, opts.maxFragmentsPerDept || 1);
+      const already = fragmentsCount.get(nextIdx) ?? 0;
+      const fragsLeft = Math.max(1, maxFrag - already);
+      const chunk = opts.allowSplitting
+        ? Math.max(1, Math.ceil(target.remaining / fragsLeft))
+        : target.remaining;
+
+      let rect = this.bestPlacementForPiece(
+        Math.min(chunk, target.remaining),
+        nextIdx,
+        occ,
+        placements,
+        M,
+        gridW,
+        gridH,
+      );
+
+      // ถ้าไม่ฟิต ลดลงทีละ 1 cell จนวางได้
+      let tryCells = Math.min(chunk, target.remaining);
+      while (!rect && tryCells > 0) {
+        tryCells--;
+        rect = this.bestPlacementForPiece(
+          tryCells,
+          nextIdx,
+          occ,
+          placements,
+          M,
+          gridW,
+          gridH,
+        );
+      }
+
+      // ถ้ายังไม่ได้ ให้หา first-fit 1 ช่อง
+      if (!rect) {
+        outer: for (let y = 0; y < gridH; y++) {
+          for (let x = 0; x < gridW; x++) {
+            if (!occ[y][x]) {
+              rect = {
+                name: target.name,
+                idx: nextIdx,
+                x,
+                y,
+                width: 1,
+                height: 1,
+              };
+              break outer;
+            }
+          }
+        }
+      }
+
+      if (!rect) {
+        // กริดเต็มหรือวางไม่ได้แล้ว
+        break;
+      }
+
+      this.mark(occ, rect.x, rect.y, rect.width, rect.height, true);
+      rect.name = target.name;
+      placements.push(rect);
+      target.remaining -= rect.width * rect.height;
+      fragmentsCount.set(nextIdx, (fragmentsCount.get(nextIdx) ?? 0) + 1);
+
+      if (!placedSet.has(nextIdx)) {
+        placedSet.add(nextIdx);
+        departmentOrder.push(target.name);
+      }
+    }
+
+    // คำนวณคะแนน closeness จริงจากผลวาง
+    let closenessScore = 0;
+    for (let i = 0; i < placements.length; i++) {
+      for (let j = i + 1; j < placements.length; j++) {
+        const a = placements[i],
+          b = placements[j];
+        if (a.idx === b.idx) continue;
+        const len = this.sharedEdgeLen(a, b);
+        if (len > 0) closenessScore += len * M[a.idx][b.idx];
+      }
+    }
+
+    const total = closenessScore; // ตอนนี้ใช้คะแนนเดียว (เพิ่ม penalty/compactness ได้ภายหลัง)
+
+    return {
+      grid: {
+        width: gridW,
+        height: gridH,
+        cellSizeMeters: opts.cellSizeMeters,
+      },
+      tcr: nodes.map((n) => ({ name: n.name, tcr: tcrs[n.idx] })),
+      seed: nodes[seedIdx].name,
+      order: departmentOrder,
+      score: { total, closeness: closenessScore },
+      // อนุญาตหลายก้อนต่อแผนก: คืน placements เป็น array ของสี่เหลี่ยมย่อย
+      placements: placements.map((r, k) => ({
+        name: r.name,
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        height: r.height,
+        part: k, // เผื่อใช้อ้างอิงบน FE
+      })),
+    };
   }
 }
