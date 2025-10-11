@@ -37,6 +37,24 @@ type GenerateOptions = {
   cellSizeMeters: number; // informational
 };
 
+const CENTER_PULL = 0.06;
+const EDGE_PADDING = 0.03;
+const TOUCH_BONUS = 0.1;
+const JITTER = 1e-3;
+
+// weighted centroid of placed rectangles (by area)
+function clusterCentroid(placed: Rect[]) {
+  if (!placed.length) return null;
+  let ax = 0, ay = 0, a = 0;
+  for (const r of placed) {
+    const area = r.width * r.height;
+    ax += (r.x + r.width / 2) * area;
+    ay += (r.y + r.height / 2) * area;
+    a += area;
+  }
+  return { cx: ax / a, cy: ay / a };
+}
+
 @Injectable()
 export class CorelapService {
   // map closeness letter -> weight; '' maps to W.blank
@@ -135,7 +153,7 @@ export class CorelapService {
     return out;
   }
 
-  // choose best rectangle position by PR = sum(sharedEdge × Msym)
+  // choose best rectangle position by PR + center/edge bias
   private bestPlacementForPiece(
     pieceCells: number,
     deptIdx: number,
@@ -148,32 +166,71 @@ export class CorelapService {
     const candidates = this.factorPairs(pieceCells, W, H);
     if (!candidates.length) return null;
 
+    const cl = clusterCentroid(placedRects);
+    const tx = cl ? cl.cx : W / 2;
+    const ty = cl ? cl.cy : H / 2;
+
     let best: { score: number; rect: Rect } | null = null;
 
     for (const { w, h } of candidates) {
+      const coords: Array<{ x: number; y: number; d: number }> = [];
       for (let y = 0; y + h <= H; y++) {
         for (let x = 0; x + w <= W; x++) {
-          if (!this.fits(occ, W, H, x, y, w, h)) continue;
-
-          const candidate: Rect = { name: '', idx: deptIdx, x, y, width: w, height: h };
-
-          // placement rating (PR) against all already placed rects
-          let pr = 0;
-          for (const r of placedRects) {
-            const len = this.sharedEdgeLen(candidate, r);
-            if (len > 0) pr += len * Msym[deptIdx][r.idx];
-          }
-
-          // small bias to stick to the cluster
-          const touchBonus = placedRects.some(
-            (r) => this.sharedEdgeLen(candidate, r) > 0,
-          )
-            ? 0.1
-            : 0;
-          const score = pr + touchBonus;
-
-          if (!best || score > best.score) best = { score, rect: candidate };
+          const cx = x + w / 2;
+          const cy = y + h / 2;
+          const d = Math.abs(cx - tx) + Math.abs(cy - ty);
+          coords.push({ x, y, d });
         }
+      }
+      coords.sort((a, b) => a.d - b.d);
+
+      for (const c of coords) {
+        if (!this.fits(occ, W, H, c.x, c.y, w, h)) continue;
+
+        const candidate: Rect = {
+          name: '',
+          idx: deptIdx,
+          x: c.x,
+          y: c.y,
+          width: w,
+          height: h,
+        };
+
+        // 1) PR
+        let pr = 0;
+        for (const r of placedRects) {
+          const len = this.sharedEdgeLen(candidate, r);
+          if (len > 0) pr += len * Msym[deptIdx][r.idx];
+        }
+
+        // 2) center pull
+        const cx = candidate.x + candidate.width / 2;
+        const cy = candidate.y + candidate.height / 2;
+        const centerGain = -(Math.abs(cx - tx) + Math.abs(cy - ty)); // ยิ่งใกล้ยิ่งดี (ค่านี้ยิ่งใหญ่)
+
+        // 3) edge padding
+        const pad = Math.min(
+          candidate.x,
+          candidate.y,
+          W - (candidate.x + candidate.width),
+          H - (candidate.y + candidate.height),
+        );
+
+        // 4) touch bonus
+        const touch = placedRects.some(
+          (r) => this.sharedEdgeLen(candidate, r) > 0,
+        )
+          ? TOUCH_BONUS
+          : 0;
+
+        const score =
+          pr +
+          CENTER_PULL * centerGain +
+          EDGE_PADDING * pad +
+          touch +
+          JITTER * Math.random();
+
+        if (!best || score > best.score) best = { score, rect: candidate };
       }
     }
     return best ? best.rect : null;
@@ -242,7 +299,11 @@ export class CorelapService {
     if (required > capacity) {
       return {
         error: `Cells required (${required}) exceed grid capacity (${capacity})`,
-        grid: { width: gridW, height: gridH, cellSizeMeters: opts.cellSizeMeters },
+        grid: {
+          width: gridW,
+          height: gridH,
+          cellSizeMeters: opts.cellSizeMeters,
+        },
       };
     }
 
@@ -272,15 +333,59 @@ export class CorelapService {
     const placeSeed = () => {
       const target = nodes[seedIdx];
       const maxFrag = Math.max(1, opts.maxFragmentsPerDept || 1);
-      const tryCells = (cells: number) =>
-        this.bestPlacementForPiece(cells, seedIdx, occ, placements, Msym, gridW, gridH);
+      const tryCenterFit = (cells: number) => {
+        const paris = this.factorPairs(cells, gridH, gridW);
+        if (!paris.length) return null;
 
-      let rect = tryCells(target.remaining);
+        const gcx = gridW / 2;
+        const gcy = gridH / 2;
+
+        let best: { score: number; rect: Rect } | null = null;
+
+        for (const { w, h } of paris) {
+          const coords: Array<{ x: number; y: number; d: number }> = [];
+          for (let y = 0; y + h <= gridH; y++) {
+            for (let x = 0; x + w <= gridW; x++) {
+              const cx = x + w / 2;
+              const cy = y + h / 2;
+              const d = Math.abs(cx - gcx) + Math.abs(cy - gcy);
+              coords.push({ x, y, d });
+            }
+          }
+          coords.sort((a, b) => a.d - b.d);
+
+          for (const c of coords) {
+            if (!this.fits(occ, gridW, gridH, c.x, c.y, w, h)) continue;
+            const rect: Rect = {
+              name: target.name,
+              idx: seedIdx,
+              x: c.x,
+              y: c.y,
+              width: w,
+              height: h,
+            };
+
+            const pad = Math.min(
+              rect.x,
+              rect.y,
+              gridW - (rect.x + rect.width),
+              gridH - (rect.y + rect.height),
+            );
+            const score = EDGE_PADDING * pad + JITTER + Math.random();
+
+            if (!best || score > best.score) best = { score, rect };
+            break;
+          }
+        }
+        return best?.rect ?? null;
+      };
+
+      let rect = tryCenterFit(target.remaining);
       if (!rect && opts.allowSplitting) {
         const chunk = Math.max(1, Math.ceil(target.cells / maxFrag));
         let cells = Math.min(chunk, target.remaining);
         while (!rect && cells > 0) {
-          rect = tryCells(cells);
+          rect = tryCenterFit(cells);
           if (!rect) cells--;
         }
       }
@@ -288,7 +393,14 @@ export class CorelapService {
         for (let y = 0; y < gridH; y++) {
           for (let x = 0; x < gridW; x++) {
             if (!occ[y][x]) {
-              rect = { name: target.name, idx: seedIdx, x, y, width: 1, height: 1 };
+              rect = {
+                name: target.name,
+                idx: seedIdx,
+                x,
+                y,
+                width: 1,
+                height: 1,
+              };
               break;
             }
           }
@@ -298,7 +410,6 @@ export class CorelapService {
       if (!rect) return false;
 
       this.mark(occ, rect.x, rect.y, rect.width, rect.height, true);
-      rect.name = target.name;
       placements.push(rect);
       target.remaining -= rect.width * rect.height;
       placedSet.add(seedIdx);
