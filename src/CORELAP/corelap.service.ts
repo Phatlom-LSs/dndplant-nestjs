@@ -45,7 +45,9 @@ const JITTER = 1e-3;
 // weighted centroid of placed rectangles (by area)
 function clusterCentroid(placed: Rect[]) {
   if (!placed.length) return null;
-  let ax = 0, ay = 0, a = 0;
+  let ax = 0,
+    ay = 0,
+    a = 0;
   for (const r of placed) {
     const area = r.width * r.height;
     ax += (r.x + r.width / 2) * area;
@@ -162,10 +164,11 @@ export class CorelapService {
     letters: string[][],
     W: Weights,
   ) {
-    const lij = (letters?.[i]?.[j] ?? '').toString().toUpperCase();
-    const lji = (letters?.[j]?.[i] ?? '').toString().toUpperCase();
-    const letter = (lij || lji || '') as keyof Weights | '';
-    return letter == '' ? (W.blank ? 0) : (W[letter] ?? 0);
+    const lij = (letters?.[i]?.[j] ?? '').toString().toUpperCase() as keyof Weights | '';
+    const lji = (letters?.[j]?.[i] ?? '').toString().toUpperCase() as keyof Weights | '';
+    const wij = lij === '' ? (W.blank ?? 0) : (W[lij] ?? 0);
+    const wji = lji === '' ? (W.blank ?? 0) : (W[lji] ?? 0);
+    return Math.max(wij, wji);
   }
 
   // choose best rectangle position by PR + center/edge bias
@@ -221,32 +224,36 @@ export class CorelapService {
           if (rect.y - 1 >= 0 && occ[rect.y - 1][xx]) {
             touching = true;
             const nb = owner[rect.y - 1][xx];
-            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+            if (nb >= 0)
+              pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
           }
 
           if (rect.y + rect.height < H && occ[rect.y + rect.height][xx]) {
             touching = true;
             const nb = owner[rect.y + rect.height][xx];
-            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+            if (nb >= 0)
+              pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
           }
         }
 
         for (let yy = rect.y; yy < rect.y + rect.height; yy++) {
-          if (rect.x -1 >= 0 && occ[yy][rect.x - 1]) {
+          if (rect.x - 1 >= 0 && occ[yy][rect.x - 1]) {
             touching = true;
             const nb = owner[yy][rect.x - 1];
-            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+            if (nb >= 0)
+              pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
           }
           if (rect.x + rect.width < W && occ[yy][rect.x + rect.width]) {
             touching = true;
             const nb = owner[yy][rect.x + rect.width];
-            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+            if (nb >= 0)
+              pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
           }
         }
 
         const corners = [
           { x: rect.x - 1, y: rect.y - 1 },
-          { x: rect.x + rect.width, y: rect.y - 1},
+          { x: rect.x + rect.width, y: rect.y - 1 },
           { x: rect.x - 1, y: rect.y + rect.height },
           { x: rect.x + rect.width, y: rect.y + rect.height },
         ];
@@ -255,14 +262,21 @@ export class CorelapService {
           if (p.x >= 0 && p.y >= 0 && p.x < W && p.y < H && occ[p.y][p.x]) {
             touching = true;
             const nb = owner[p.y][p.x];
-            if (nb >= 0) pr += 0.5 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+            if (nb >= 0)
+              pr += 0.5 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
           }
         }
         if (!touching) continue;
 
-        const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+        const cx = rect.x + rect.width / 2,
+          cy = rect.y + rect.height / 2;
         const centerGain = -(Math.abs(cx - tx) + Math.abs(cy - ty));
-        const pad = Math.min(rect.x, rect.y, W - (rect.x + rect.width), H - (rect.y + rect.height));
+        const pad = Math.min(
+          rect.x,
+          rect.y,
+          W - (rect.x + rect.width),
+          H - (rect.y + rect.height),
+        );
         const touchBonus = TOUCH_BONUS;
 
         const score =
@@ -387,7 +401,7 @@ export class CorelapService {
       const target = nodes[seedIdx];
       const maxFrag = Math.max(1, opts.maxFragmentsPerDept || 1);
       const tryCenterFit = (cells: number) => {
-        const paris = this.factorPairs(cells, gridH, gridW);
+        const paris = this.factorPairs(cells, gridW, gridH);
         if (!paris.length) return null;
 
         const gcx = gridW / 2;
@@ -511,8 +525,10 @@ export class CorelapService {
         Math.min(chunk, target.remaining),
         nextIdx,
         occ,
+        owner,
         placements,
-        Msym,
+        letters,
+        W,
         gridW,
         gridH,
       );
@@ -520,7 +536,17 @@ export class CorelapService {
       let tryCells = Math.min(chunk, target.remaining);
       while (!rect && tryCells > 0) {
         tryCells--;
-        rect = this.bestPlacementForPiece(tryCells, nextIdx, occ, placements, Msym, gridW, gridH);
+        rect = this.bestPlacementForPiece(
+          tryCells,
+          nextIdx,
+          occ,
+          owner,
+          placements,
+          letters,
+          W,
+          gridW,
+          gridH,
+        );
       }
 
       if (!rect) {
@@ -536,7 +562,16 @@ export class CorelapService {
 
       if (!rect) break;
 
-      this.mark(occ, rect.x, rect.y, rect.width, rect.height, true);
+      this.mark(
+        occ,
+        owner,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        true,
+        rect.idx,
+      );
       rect.name = target.name;
       placements.push(rect);
       target.remaining -= rect.width * rect.height;
