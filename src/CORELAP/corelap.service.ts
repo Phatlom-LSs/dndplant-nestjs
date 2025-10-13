@@ -123,15 +123,18 @@ export class CorelapService {
 
   private mark(
     occ: boolean[][],
+    owner: number[][],
     x: number,
     y: number,
     w: number,
     h: number,
     v: boolean,
+    deptIdx: number,
   ) {
     for (let yy = y; yy < y + h; yy++) {
       for (let xx = x; xx < x + w; xx++) {
         occ[yy][xx] = v;
+        owner[yy][xx] = v ? deptIdx : -1;
       }
     }
   }
@@ -153,13 +156,27 @@ export class CorelapService {
     return out;
   }
 
+  private weightFromLetters(
+    i: number,
+    j: number,
+    letters: string[][],
+    W: Weights,
+  ) {
+    const lij = (letters?.[i]?.[j] ?? '').toString().toUpperCase();
+    const lji = (letters?.[j]?.[i] ?? '').toString().toUpperCase();
+    const letter = (lij || lji || '') as keyof Weights | '';
+    return letter == '' ? (W.blank ? 0) : (W[letter] ?? 0);
+  }
+
   // choose best rectangle position by PR + center/edge bias
   private bestPlacementForPiece(
     pieceCells: number,
     deptIdx: number,
     occ: boolean[][],
+    owner: number[][],
     placedRects: Rect[],
-    Msym: number[][],
+    letters: string[][],
+    Wmap: Weights,
     W: number,
     H: number,
   ): Rect | null {
@@ -187,7 +204,7 @@ export class CorelapService {
       for (const c of coords) {
         if (!this.fits(occ, W, H, c.x, c.y, w, h)) continue;
 
-        const candidate: Rect = {
+        const rect: Rect = {
           name: '',
           idx: deptIdx,
           x: c.x,
@@ -198,39 +215,64 @@ export class CorelapService {
 
         // 1) PR
         let pr = 0;
-        for (const r of placedRects) {
-          const len = this.sharedEdgeLen(candidate, r);
-          if (len > 0) pr += len * Msym[deptIdx][r.idx];
+        let touching = false;
+
+        for (let xx = rect.x; xx < rect.x + rect.width; xx++) {
+          if (rect.y - 1 >= 0 && occ[rect.y - 1][xx]) {
+            touching = true;
+            const nb = owner[rect.y - 1][xx];
+            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+          }
+
+          if (rect.y + rect.height < H && occ[rect.y + rect.height][xx]) {
+            touching = true;
+            const nb = owner[rect.y + rect.height][xx];
+            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+          }
         }
 
-        // 2) center pull
-        const cx = candidate.x + candidate.width / 2;
-        const cy = candidate.y + candidate.height / 2;
-        const centerGain = -(Math.abs(cx - tx) + Math.abs(cy - ty)); // ยิ่งใกล้ยิ่งดี (ค่านี้ยิ่งใหญ่)
+        for (let yy = rect.y; yy < rect.y + rect.height; yy++) {
+          if (rect.x -1 >= 0 && occ[yy][rect.x - 1]) {
+            touching = true;
+            const nb = owner[yy][rect.x - 1];
+            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+          }
+          if (rect.x + rect.width < W && occ[yy][rect.x + rect.width]) {
+            touching = true;
+            const nb = owner[yy][rect.x + rect.width];
+            if (nb >= 0) pr += 1.0 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+          }
+        }
 
-        // 3) edge padding
-        const pad = Math.min(
-          candidate.x,
-          candidate.y,
-          W - (candidate.x + candidate.width),
-          H - (candidate.y + candidate.height),
-        );
+        const corners = [
+          { x: rect.x - 1, y: rect.y - 1 },
+          { x: rect.x + rect.width, y: rect.y - 1},
+          { x: rect.x - 1, y: rect.y + rect.height },
+          { x: rect.x + rect.width, y: rect.y + rect.height },
+        ];
 
-        // 4) touch bonus
-        const touch = placedRects.some(
-          (r) => this.sharedEdgeLen(candidate, r) > 0,
-        )
-          ? TOUCH_BONUS
-          : 0;
+        for (const p of corners) {
+          if (p.x >= 0 && p.y >= 0 && p.x < W && p.y < H && occ[p.y][p.x]) {
+            touching = true;
+            const nb = owner[p.y][p.x];
+            if (nb >= 0) pr += 0.5 * this.weightFromLetters(deptIdx, nb, letters, Wmap);
+          }
+        }
+        if (!touching) continue;
+
+        const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+        const centerGain = -(Math.abs(cx - tx) + Math.abs(cy - ty));
+        const pad = Math.min(rect.x, rect.y, W - (rect.x + rect.width), H - (rect.y + rect.height));
+        const touchBonus = TOUCH_BONUS;
 
         const score =
           pr +
           CENTER_PULL * centerGain +
           EDGE_PADDING * pad +
-          touch +
+          touchBonus +
           JITTER * Math.random();
 
-        if (!best || score > best.score) best = { score, rect: candidate };
+        if (!best || score > best.score) best = { score, rect };
       }
     }
     return best ? best.rect : null;
@@ -325,9 +367,20 @@ export class CorelapService {
 
     // occupancy map
     const occ: boolean[][] = Array.from({ length: gridH }, () => Array<boolean>(gridW).fill(false));
+    const owner: number[][] = Array.from({ length: gridH }, () => Array(gridW).fill(-1));
     const placements: Rect[] = [];
     const placedSet = new Set<number>();
     const fragmentsCount = new Map<number, number>();
+    const DIRS = [
+      { dx: 1, dy: 0, factor: 1.0 },
+      { dx: -1, dy: 0, factor: 1.0 },
+      { dx: 0, dy: 1, factor: 1.0 },
+      { dx: 0, dy: -1, factor: 1.0 },
+      { dx: 1, dy: 1, factor: 0.5 },
+      { dx: 1, dy: -1, factor: 0.5 },
+      { dx: -1, dy: 1, factor: 0.5 },
+      { dx: -1, dy: -1, factor: 0.5 },
+    ];
 
     // place seed (try full piece, then split if allowed)
     const placeSeed = () => {
@@ -409,7 +462,16 @@ export class CorelapService {
       }
       if (!rect) return false;
 
-      this.mark(occ, rect.x, rect.y, rect.width, rect.height, true);
+      this.mark(
+        occ,
+        owner,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        true,
+        rect.idx,
+      );
       placements.push(rect);
       target.remaining -= rect.width * rect.height;
       placedSet.add(seedIdx);
