@@ -10,9 +10,9 @@ type DeptNode = { idx:number; name:string; fixed:boolean };
 type Cell = { x:number; y:number; idx:number; name:string };
 type Step = { step:number; name:string; idx:number; x:number; y:number; pr:number; tier:Letter|'none'; tcr:number };
 
-const CENTER_PULL = 0.04;   // ไบอัสเล็กๆเข้าหาศูนย์กลาง (กันไปกองมุม)
-const EDGE_PADDING = 0.02;  // ไบอัสเล็กๆเว้นขอบ
-const JITTER = 1e-6;        // แตกเสมอคะแนนเท่ากัน
+const CENTER_PULL = 0.04;   // ดึงเข้าส่วนกลางนิดหน่อย กันไปกองมุม
+const EDGE_PADDING = 0.02;  // เว้นขอบนิดหน่อย
+const JITTER = 1e-6;        // แตกคะแนนเวลาชนกันพอดี
 
 @Injectable()
 export class CorelapService {
@@ -22,7 +22,7 @@ export class CorelapService {
     return (W[key] ?? 0) as number;
   }
 
-  // ใช้ Msym = W + W^T เพื่อให้ TCR/PR เป็นสองทาง
+  // Msym = W + W^T (แนวคิดสองทางสำหรับ TCR/PR)
   private numericMatrixSym(letters: string[][], W: Weights): number[][] {
     const n = letters.length;
     const M = Array.from({ length: n }, () => Array(n).fill(0));
@@ -41,7 +41,7 @@ export class CorelapService {
     let s = 0; for (let j=0;j<Msym.length;j++) s += Msym[i][j]; return s;
   }
 
-  // ค่าน้ำหนักฝั่งเดียว (ใช้ตอนนับด้าน/มุม) = max(letter_ij, letter_ji) แบบที่คุยกัน
+  // น้ำหนักฝั่งเดียว (ใช้ตอนนับด้าน/มุม): max(ij, ji)
   private weightPair(i:number, j:number, letters:string[][], W:Weights){
     const lij = (letters?.[i]?.[j] ?? '').toString().toUpperCase() as keyof Weights | '';
     const lji = (letters?.[j]?.[i] ?? '').toString().toUpperCase() as keyof Weights | '';
@@ -50,7 +50,7 @@ export class CorelapService {
     return Math.max(wij, wji);
   }
 
-  // คำนวณ PR ของการวางแผนก i ที่ cell (x,y) จากเพื่อนบ้าน 8 ทิศ
+  // PR ของการวางแผนก i ที่ cell (x,y) จากเพื่อนบ้าน 8 ทิศ
   private placementPR(
     i:number, x:number, y:number,
     owner:number[][], letters:string[][], W:Weights,
@@ -60,7 +60,7 @@ export class CorelapService {
     let pr = 0;
     let touching = false;
 
-    // 4 ด้าน: factor 1.0
+    // 4 ด้าน (น้ำหนักเต็ม)
     const sides = [
       {dx:  1, dy:  0}, {dx: -1, dy:  0},
       {dx:  0, dy:  1}, {dx:  0, dy: -1},
@@ -74,7 +74,7 @@ export class CorelapService {
       }
     }
 
-    // 4 มุม: factor 0.5
+    // 4 มุม (ครึ่งน้ำหนัก)
     const corners = [
       {dx:  1, dy:  1}, {dx:  1, dy: -1},
       {dx: -1, dy:  1}, {dx: -1, dy: -1},
@@ -90,27 +90,26 @@ export class CorelapService {
 
     if (!touching) return { pr: -Infinity, score: -Infinity }; // ต้องแตะอย่างน้อย 1 จุด
 
-    // ไบอัสเล็กๆกันไปกองมุม/ขอบ และช่วยแตกคะแนน
-    const centerGain = -(Math.abs(x - targetX) + Math.abs(y - targetY)); // ใกล้ศูนย์กลางดีกว่า
-    const pad = Math.min(x, y, gridW - 1 - x, gridH - 1 - y);           // เว้นขอบเล็กน้อย
+    // กันกองมุม/ขอบ + แตกคะแนน
+    const centerGain = -(Math.abs(x - targetX) + Math.abs(y - targetY)); // ใกล้ center ดี
+    const pad = Math.min(x, y, gridW - 1 - x, gridH - 1 - y);           // เว้นขอบ
     const score = pr + CENTER_PULL * centerGain + EDGE_PADDING * pad + JITTER*Math.random();
 
     return { pr, score };
   }
 
-  // เลือกคิวถัดไป: Tier-first (A>E>I>O>U) กับชุดที่วางแล้ว, tie-break ด้วย TCR
+  // เลือกคิวถัดไป: พิจารณา Tier A>E>I>O>U กับชุดที่วางแล้ว; เสมอ → TCR
   private pickNextByTier(
     letters:string[][], placed:Set<number>, tcrs:number[], nodes:DeptNode[]
   ): { idx:number; tier:Letter|'none' } {
-    const placedSet = placed;
-    const unplaced = nodes.map(n=>n.idx).filter(i => !placedSet.has(i));
+    const unplaced = nodes.map(n=>n.idx).filter(i => !placed.has(i));
     if (unplaced.length===0) return { idx:-1, tier:'none' };
 
     for (const tier of TIER_ORDER){
       const bucket:number[] = [];
       for (const i of unplaced){
         let ok = false;
-        placedSet.forEach(j=>{
+        placed.forEach(j=>{
           const lij = (letters[i]?.[j] ?? '').toUpperCase();
           const lji = (letters[j]?.[i] ?? '').toUpperCase();
           if (lij === tier || lji === tier) ok = true;
@@ -124,7 +123,7 @@ export class CorelapService {
       }
     }
 
-    // ไม่มี tier กับของที่วางแล้ว → เอา TCR สูงสุดที่ยังไม่วาง
+    // ไม่มี tier กับของที่วางแล้ว → เลือก TCR สูงสุด
     let best = unplaced[0];
     for (const i of unplaced) if (tcrs[i] > tcrs[best]) best = i;
     return { idx: best, tier: 'none' };
@@ -144,27 +143,26 @@ export class CorelapService {
     const gridW = dto.gridWidth;
     const gridH = dto.gridHeight;
 
-    // รายชื่อแผนกแบบ “แค่ 1 บล็อกต่อแผนก” ไม่สน area
+    // รายชื่อแผนกแบบ “1 บล็อก/แผนก” (ไม่สน area)
     const nodes: DeptNode[] = (dto.departments || []).map((d, i) => ({
       idx: i, name: d.name, fixed: !!d.fixed
     }));
 
-    // owner = ดัชนีแผนกที่ยึด cell นั้น (-1 = ว่าง)
-    const owner = Array.from({ length: gridH }, () => Array(gridW).fill(-1));
+    // owner: เก็บ index แผนกในแต่ละ cell; -1 = ว่าง
+    const owner: number[][] = Array.from({ length: gridH }, () => Array(gridW).fill(-1));
 
     const letters = dto.closenessMatrix as string[][];
     const Msym = this.numericMatrixSym(letters, W);
     const tcrs = nodes.map(n => this.tcr(n.idx, Msym));
 
-    // 1) วาง seed ตรงกลางสุดที่ว่าง (ไม่สน PR เพราะยังไม่มีใครให้แตะ)
+    // --- วาง seed: TCR สูงสุด ใกล้ center สุดที่ว่าง
     let seedIdx = nodes[0]?.idx ?? 0, maxTCR = -Infinity;
     for (const n of nodes) {
       if (tcrs[n.idx] > maxTCR) { maxTCR = tcrs[n.idx]; seedIdx = n.idx; }
     }
     const targetX = Math.floor(gridW/2), targetY = Math.floor(gridH/2);
     let sx = targetX, sy = targetY;
-    // หา cell ว่างที่ใกล้ center สุด
-    if (owner[sy][sx] !== -1) {
+    if (owner[sy]?.[sx] !== -1) {
       const coords: Array<{x:number;y:number;d:number}> = [];
       for (let y=0;y<gridH;y++) for (let x=0;x<gridW;x++)
         coords.push({ x, y, d: Math.abs(x-targetX)+Math.abs(y-targetY) });
@@ -180,13 +178,12 @@ export class CorelapService {
     }];
     let stepNo = 1;
 
-    // 2) วางทีละแผนกที่เหลือ: เลือกตาม tier → หา cell ว่างที่ PR สูงสุด
+    // --- หลัก: เลือกคิวแบบ Tier-first → หา cell ว่างที่ได้ PR สูงสุด (ต้องแตะใครสักคน)
     while (placed.size < nodes.length) {
       const pick = this.pickNextByTier(letters, placed, tcrs, nodes);
       const i = pick.idx;
       if (i === -1) break;
 
-      // สแกนทุก cell ว่าง: ประเมิน PR + ไบอัสเล็กๆ
       let best = { pr: -Infinity, score: -Infinity, x: -1, y: -1 };
       const cx = Math.floor(gridW/2), cy = Math.floor(gridH/2);
       for (let y=0;y<gridH;y++){
@@ -197,7 +194,7 @@ export class CorelapService {
         }
       }
 
-      // ถ้าไม่มี cell ที่แตะใครเลย (กริดว่างส่วนที่เหลือ) ให้เอา cell ว่างที่ใกล้ center สุด
+      // ไม่มีตำแหน่งที่แตะใครเลย → วางใกล้ center สุด
       if (!isFinite(best.score)) {
         const coords: Array<{x:number;y:number;d:number}> = [];
         for (let y=0;y<gridH;y++) for (let x=0;x<gridW;x++)
@@ -206,7 +203,7 @@ export class CorelapService {
         if (coords.length) { best = { pr: 0, score: 0, x: coords[0].x, y: coords[0].y }; }
       }
 
-      if (best.x === -1) break; // ไม่เหลือที่ว่าง
+      if (best.x === -1) break; // เต็ม
 
       owner[best.y][best.x] = i;
       placed.add(i);
@@ -222,7 +219,7 @@ export class CorelapService {
       });
     }
 
-    // สรุปคะแนน PR รวม (นับเฉพาะเพื่อนบ้าน 8 ทิศของคู่วางจริง)
+    // รวมคะแนน PR ของผังสุดท้าย (ดู 8 ทิศ)
     let totalPR = 0;
     const dirs = [
       {dx:  1, dy:  0, w: 1.0}, {dx: -1, dy:  0, w: 1.0},
@@ -239,19 +236,17 @@ export class CorelapService {
         }
       }
     }
-    // นับซ้ำสองทิศอยู่แล้ว ไม่จำเป็นต้องหารสองถ้าไม่ต้องการ
 
     return {
       grid: { width: gridW, height: gridH, cellSizeMeters: opts.cellSizeMeters },
       mode: 'CRAFT-like (unit blocks)',
       tcr: nodes.map(n => ({ name: n.name, tcr: tcrs[n.idx] })),
       seed: nodes[seedIdx].name,
-      order: steps.map(s => s.name), // ชื่อเรียงตามลำดับวาง
-      steps,                          // รายละเอียดต่อสเต็ป
+      order: steps.map(s => s.name),  // ชื่อเรียงตามลำดับวาง
+      steps,                          // รายละเอียดแต่ละสเต็ป (ตำแหน่ง, PR, tier, TCR)
       score: { totalPR },
-      // ส่งตำแหน่งบล็อกเดียวต่อแผนก (width/height = 1)
       placements: placements.map(p => ({ name: p.name, x: p.x, y: p.y, width:1, height:1 })),
-      ownerGrid: owner, // (ถ้าจะ debug/แสดงผลบน FE)
+      ownerGrid: owner,               // เผื่อ debug ฝั่ง FE
     };
   }
 }
