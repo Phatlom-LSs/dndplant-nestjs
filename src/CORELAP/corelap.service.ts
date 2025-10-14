@@ -100,7 +100,7 @@ export class CorelapService {
 
   // เลือกคิวถัดไป: Tier-first (A>E>I>O>U) กับชุดที่วางแล้ว, tie-break ด้วย TCR
   private pickNextByTier(
-    letters:string[][], placed:set<number>, tcrs:number[], nodes:DeptNode[]
+    letters:string[][], placed:Set<number>, tcrs:number[], nodes:DeptNode[]
   ): { idx:number; tier:Letter|'none' } {
     const placedSet = placed;
     const unplaced = nodes.map(n=>n.idx).filter(i => !placedSet.has(i));
@@ -182,7 +182,7 @@ export class CorelapService {
 
     // 2) วางทีละแผนกที่เหลือ: เลือกตาม tier → หา cell ว่างที่ PR สูงสุด
     while (placed.size < nodes.length) {
-      const pick = this.pickNextByTier(letters, placed as any, tcrs, nodes);
+      const pick = this.pickNextByTier(letters, placed, tcrs, nodes);
       const i = pick.idx;
       if (i === -1) break;
 
