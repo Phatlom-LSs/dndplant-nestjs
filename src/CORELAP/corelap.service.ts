@@ -10,9 +10,9 @@ type DeptNode = { idx:number; name:string; fixed:boolean };
 type Cell = { x:number; y:number; idx:number; name:string };
 type Step = { step:number; name:string; idx:number; x:number; y:number; pr:number; tier:Letter|'none'; tcr:number };
 
-const CENTER_PULL = 0.04;   // ดึงเข้าส่วนกลางนิดหน่อย กันไปกองมุม
-const EDGE_PADDING = 0.02;  // เว้นขอบนิดหน่อย
-const JITTER = 1e-6;        // แตกคะแนนเวลาชนกันพอดี
+const CENTER_PULL = 0.04;
+const EDGE_PADDING = 0.02;
+const JITTER = 1e-6;
 
 @Injectable()
 export class CorelapService {
@@ -22,7 +22,7 @@ export class CorelapService {
     return (W[key] ?? 0) as number;
   }
 
-  // Msym = W + W^T (แนวคิดสองทางสำหรับ TCR/PR)
+  // Msym = W + W^T (สองทาง)
   private numericMatrixSym(letters: string[][], W: Weights): number[][] {
     const n = letters.length;
     const M = Array.from({ length: n }, () => Array(n).fill(0));
@@ -41,13 +41,38 @@ export class CorelapService {
     let s = 0; for (let j=0;j<Msym.length;j++) s += Msym[i][j]; return s;
   }
 
-  // น้ำหนักฝั่งเดียว (ใช้ตอนนับด้าน/มุม): max(ij, ji)
+  // น้ำหนักฝั่งเดียว: max(ij, ji)
   private weightPair(i:number, j:number, letters:string[][], W:Weights){
     const lij = (letters?.[i]?.[j] ?? '').toString().toUpperCase() as keyof Weights | '';
     const lji = (letters?.[j]?.[i] ?? '').toString().toUpperCase() as keyof Weights | '';
     const wij = lij === '' ? (W.blank ?? 0) : (W[lij] ?? 0);
     const wji = lji === '' ? (W.blank ?? 0) : (W[lji] ?? 0);
     return Math.max(wij, wji);
+  }
+
+  // --- NEW: ใช้เป็น tie-break เมื่อ TCR เท่ากัน
+  // ดูค่าน้ำหนักสูงสุดใน "แถว i" (ทิศ i->j) และนับจำนวนที่เป็นค่าสูงสุด
+  private rowMaxStats(i:number, letters:string[][], W:Weights){
+    let maxW = -Infinity;
+    let cnt = 0;
+    const n = letters.length;
+    for (let j=0;j<n;j++){
+      if (j === i) continue;
+      const v = this.w((letters?.[i]?.[j] ?? '').toString(), W);
+      if (v > maxW){ maxW = v; cnt = 1; }
+      else if (v === maxW){ cnt++; }
+    }
+    return { maxW, cnt };
+  }
+
+  // เปรียบ i กับ k เมื่อ TCR เท่ากัน
+  private betterByRow(i:number, k:number, letters:string[][], W:Weights){
+    const a = this.rowMaxStats(i, letters, W);
+    const b = this.rowMaxStats(k, letters, W);
+    if (a.maxW !== b.maxW) return a.maxW > b.maxW ? i : k;
+    if (a.cnt   !== b.cnt)   return a.cnt   > b.cnt   ? i : k;
+    // deterministic สุดท้าย
+    return i < k ? i : k;
   }
 
   // PR ของการวางแผนก i ที่ cell (x,y) จากเพื่อนบ้าน 8 ทิศ
@@ -60,7 +85,7 @@ export class CorelapService {
     let pr = 0;
     let touching = false;
 
-    // 4 ด้าน (น้ำหนักเต็ม)
+    // 4 ด้าน: 1.0
     const sides = [
       {dx:  1, dy:  0}, {dx: -1, dy:  0},
       {dx:  0, dy:  1}, {dx:  0, dy: -1},
@@ -74,7 +99,7 @@ export class CorelapService {
       }
     }
 
-    // 4 มุม (ครึ่งน้ำหนัก)
+    // 4 มุม: 0.5
     const corners = [
       {dx:  1, dy:  1}, {dx:  1, dy: -1},
       {dx: -1, dy:  1}, {dx: -1, dy: -1},
@@ -88,19 +113,17 @@ export class CorelapService {
       }
     }
 
-    if (!touching) return { pr: -Infinity, score: -Infinity }; // ต้องแตะอย่างน้อย 1 จุด
+    if (!touching) return { pr: -Infinity, score: -Infinity };
 
-    // กันกองมุม/ขอบ + แตกคะแนน
-    const centerGain = -(Math.abs(x - targetX) + Math.abs(y - targetY)); // ใกล้ center ดี
-    const pad = Math.min(x, y, gridW - 1 - x, gridH - 1 - y);           // เว้นขอบ
+    const centerGain = -(Math.abs(x - targetX) + Math.abs(y - targetY));
+    const pad = Math.min(x, y, gridW - 1 - x, gridH - 1 - y);
     const score = pr + CENTER_PULL * centerGain + EDGE_PADDING * pad + JITTER*Math.random();
-
     return { pr, score };
   }
 
-  // เลือกคิวถัดไป: พิจารณา Tier A>E>I>O>U กับชุดที่วางแล้ว; เสมอ → TCR
+  // เลือกคิวถัดไป: tier-first; tie TCR → betterByRow
   private pickNextByTier(
-    letters:string[][], placed:Set<number>, tcrs:number[], nodes:DeptNode[]
+    letters:string[][], placed:Set<number>, tcrs:number[], nodes:DeptNode[], W:Weights
   ): { idx:number; tier:Letter|'none' } {
     const unplaced = nodes.map(n=>n.idx).filter(i => !placed.has(i));
     if (unplaced.length===0) return { idx:-1, tier:'none' };
@@ -118,14 +141,20 @@ export class CorelapService {
       }
       if (bucket.length){
         let best = bucket[0];
-        for (const i of bucket) if (tcrs[i] > tcrs[best]) best = i;
+        for (const i of bucket){
+          if (tcrs[i] > tcrs[best]) best = i;
+          else if (tcrs[i] === tcrs[best]) best = this.betterByRow(best, i, letters, W);
+        }
         return { idx: best, tier };
       }
     }
 
-    // ไม่มี tier กับของที่วางแล้ว → เลือก TCR สูงสุด
+    // ไม่มี tier → TCR สูงสุด; tie → betterByRow
     let best = unplaced[0];
-    for (const i of unplaced) if (tcrs[i] > tcrs[best]) best = i;
+    for (const i of unplaced){
+      if (tcrs[i] > tcrs[best]) best = i;
+      else if (tcrs[i] === tcrs[best]) best = this.betterByRow(best, i, letters, W);
+    }
     return { idx: best, tier: 'none' };
   }
 
@@ -143,23 +172,25 @@ export class CorelapService {
     const gridW = dto.gridWidth;
     const gridH = dto.gridHeight;
 
-    // รายชื่อแผนกแบบ “1 บล็อก/แผนก” (ไม่สน area)
     const nodes: DeptNode[] = (dto.departments || []).map((d, i) => ({
       idx: i, name: d.name, fixed: !!d.fixed
     }));
 
-    // owner: เก็บ index แผนกในแต่ละ cell; -1 = ว่าง
     const owner: number[][] = Array.from({ length: gridH }, () => Array(gridW).fill(-1));
 
     const letters = dto.closenessMatrix as string[][];
     const Msym = this.numericMatrixSym(letters, W);
     const tcrs = nodes.map(n => this.tcr(n.idx, Msym));
 
-    // --- วาง seed: TCR สูงสุด ใกล้ center สุดที่ว่าง
-    let seedIdx = nodes[0]?.idx ?? 0, maxTCR = -Infinity;
+    // --- seed: TCR สูงสุด; ถ้าเท่ากันใช้ betterByRow
+    let seedIdx = nodes[0]?.idx ?? 0;
+    let maxTCR = -Infinity;
     for (const n of nodes) {
-      if (tcrs[n.idx] > maxTCR) { maxTCR = tcrs[n.idx]; seedIdx = n.idx; }
+      const t = tcrs[n.idx];
+      if (t > maxTCR){ maxTCR = t; seedIdx = n.idx; }
+      else if (t === maxTCR){ seedIdx = this.betterByRow(seedIdx, n.idx, letters, W); }
     }
+
     const targetX = Math.floor(gridW/2), targetY = Math.floor(gridH/2);
     let sx = targetX, sy = targetY;
     if (owner[sy]?.[sx] !== -1) {
@@ -178,9 +209,9 @@ export class CorelapService {
     }];
     let stepNo = 1;
 
-    // --- หลัก: เลือกคิวแบบ Tier-first → หา cell ว่างที่ได้ PR สูงสุด (ต้องแตะใครสักคน)
+    // --- หลัก: Tier-first → หา cell ที่ PR สูงสุด
     while (placed.size < nodes.length) {
-      const pick = this.pickNextByTier(letters, placed, tcrs, nodes);
+      const pick = this.pickNextByTier(letters, placed, tcrs, nodes, W);
       const i = pick.idx;
       if (i === -1) break;
 
@@ -194,7 +225,7 @@ export class CorelapService {
         }
       }
 
-      // ไม่มีตำแหน่งที่แตะใครเลย → วางใกล้ center สุด
+      // ไม่มีตำแหน่งที่แตะใครเลย → ใกล้ center สุด
       if (!isFinite(best.score)) {
         const coords: Array<{x:number;y:number;d:number}> = [];
         for (let y=0;y<gridH;y++) for (let x=0;x<gridW;x++)
@@ -203,7 +234,7 @@ export class CorelapService {
         if (coords.length) { best = { pr: 0, score: 0, x: coords[0].x, y: coords[0].y }; }
       }
 
-      if (best.x === -1) break; // เต็ม
+      if (best.x === -1) break;
 
       owner[best.y][best.x] = i;
       placed.add(i);
@@ -219,7 +250,7 @@ export class CorelapService {
       });
     }
 
-    // รวมคะแนน PR ของผังสุดท้าย (ดู 8 ทิศ)
+    // รวม PR (8 ทิศ)
     let totalPR = 0;
     const dirs = [
       {dx:  1, dy:  0, w: 1.0}, {dx: -1, dy:  0, w: 1.0},
@@ -242,11 +273,11 @@ export class CorelapService {
       mode: 'CRAFT-like (unit blocks)',
       tcr: nodes.map(n => ({ name: n.name, tcr: tcrs[n.idx] })),
       seed: nodes[seedIdx].name,
-      order: steps.map(s => s.name),  // ชื่อเรียงตามลำดับวาง
-      steps,                          // รายละเอียดแต่ละสเต็ป (ตำแหน่ง, PR, tier, TCR)
+      order: steps.map(s => s.name),
+      steps,
       score: { totalPR },
       placements: placements.map(p => ({ name: p.name, x: p.x, y: p.y, width:1, height:1 })),
-      ownerGrid: owner,               // เผื่อ debug ฝั่ง FE
+      ownerGrid: owner,
     };
   }
 }
