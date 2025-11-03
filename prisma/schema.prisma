@@ -22,6 +22,7 @@ model Project {
   userId    Int
   user      userdata  @relation(fields: [userId], references: [id])
   layouts   Layout[]
+  aldep     AldepRun[]
   createdAt DateTime  @default(now())
 }
 
@@ -31,7 +32,7 @@ model Layout {
   gridSize    Int
   gridWidth     Int        @default(0)
   gridHeight    Int        @default(0)
-  project     Project          @relation(fields: [projectId], references: [id])
+  project     Project @relation(fields: [projectId], references: [id])
   projectId   String
   departments Department[]
   craftResults CraftResult[]
@@ -66,4 +67,25 @@ model CraftResult {
   totalDistance Int
   resultJson  Json
   createdAt   DateTime  @default(now())
+}
+
+model AldepRun {
+  id             String   @id @default(uuid())
+  project        Project  @relation(fields: [projectId], references: [id])
+  projectId      String
+
+  name           String
+  gridWidth      Int
+  gridHeight     Int
+
+  lowerBound     String   @default("A")
+  stripWidth     Int      @default(1)   // NEW: ความกว้างแถบ (คอลัมน์ต่อแถบ)
+  seeds          Int      @default(8)
+  cellSizeMeters Float?
+
+  inputJson      Json
+  resultJson     Json
+  createdAt      DateTime @default(now())
+
+  @@index([projectId, createdAt])
 }
