@@ -1,32 +1,89 @@
-export type ClosenessLetter = '' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X';
-export type SweepMode = 'row' | 'snake' | 'col' | 'col-snake';
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-export class GenerateAldepDto {
-  projectId!: string;
-  name?: string;
+export class AldepDepartmentDto {
+  @IsString()
+  name: string;
 
-  gridWidth!: number;
-  gridHeight!: number;
-  cellSizeMeters?: number;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  area?: number;
 
-  departments!: Array<{ name: string; area: number; fixed?: boolean }>;
+  @IsOptional()
+  @IsBoolean()
+  fixed?: boolean;
+}
 
-  closenessMatrix!: string[][];
-  closenessWeights?: {
-    A?: number;
-    E?: number;
-    I?: number;
-    O?: number;
-    U?: number;
-    X?: number;
-    blank?: number;
-  };
+export class AldepGenerateDto {
+  @IsString()
+  name: string;
 
-  lowerBound?: ClosenessLetter;
-  stripWidth?: SweepMode;
+  @IsString()
+  projectId: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  gridWidth: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  gridHeight: number;
+
+  @ValidateNested({ each: true })
+  @Type(() => AldepDepartmentDto)
+  departments: AldepDepartmentDto[];
+
+  @IsArray()
+  closenessMatrix: string[][];
+
+  // weights object ไม่บังคับ cast ราย field ก็ได้
+  @IsOptional()
+  closenessWeights?: Record<
+    'A' | 'E' | 'I' | 'O' | 'U' | 'X' | 'blank',
+    number
+  >;
+
+  @IsOptional()
+  @IsIn(['A', 'E', 'I', 'O', 'U', 'X', ''])
+  lowerBound?: '' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  stripWidth?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   seeds?: number;
-  randomSeed?: number;
 
-  allowSplitting?: boolean;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   maxFragmentsPerDept?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowSplitting?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @Min(0)
+  cellSizeMeters?: number;
 }
