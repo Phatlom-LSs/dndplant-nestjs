@@ -10,9 +10,11 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+export type ClosenessLetter = '' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X';
+
 export class AldepDepartmentDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -27,38 +29,38 @@ export class AldepDepartmentDto {
 
 export class AldepGenerateDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsString()
-  projectId: string;
+  projectId!: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  gridWidth: number;
+  gridWidth!: number;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  gridHeight: number;
+  gridHeight!: number;
 
   @ValidateNested({ each: true })
   @Type(() => AldepDepartmentDto)
-  departments: AldepDepartmentDto[];
+  departments!: AldepDepartmentDto[];
 
   @IsArray()
-  closenessMatrix: string[][];
+  closenessMatrix!: string[][];
 
-  // weights object ไม่บังคับ cast ราย field ก็ได้
   @IsOptional()
   closenessWeights?: Record<
     'A' | 'E' | 'I' | 'O' | 'U' | 'X' | 'blank',
     number
   >;
 
+  // เลือกเกณฑ์ขั้นต่ำของความสัมพันธ์ (lower bound) เช่น 'E' = ใช้เฉพาะ A/E
   @IsOptional()
-  @IsIn(['A', 'E', 'I', 'O', 'U', 'X', ''])
-  lowerBound?: '' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X';
+  @IsIn(['', 'A', 'E', 'I', 'O', 'U', 'X'])
+  lowerBound?: ClosenessLetter;
 
   @IsOptional()
   @Type(() => Number)
@@ -87,3 +89,5 @@ export class AldepGenerateDto {
   @Min(0)
   cellSizeMeters?: number;
 }
+
+export { AldepGenerateDto as GenerateAldepDto };
