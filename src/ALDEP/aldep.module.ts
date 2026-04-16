@@ -1,4 +1,3 @@
-// src/ALDEP/aldep.module.ts
 import { Module } from '@nestjs/common';
 import { AldepController } from './aldep.controller';
 import { AldepService } from './aldep.service';

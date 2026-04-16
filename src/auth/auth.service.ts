@@ -3,7 +3,6 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { PersonalService } from 'src/personal/personal.service';
 import { AuthPayloadDto } from './dto/login.dto';
 import { DatabaseService } from 'src/database/database.service';
 import * as bcrypt from 'bcrypt';
@@ -43,7 +42,7 @@ export class AuthService {
     return { message: 'signup was successful' };
   }
 
-  async signin(dto: AuthPayloadDto, req: Request, res: Response) {
+  async signin(dto: AuthPayloadDto, _req: Request, res: Response) {
     const { username, password } = dto;
 
     const foundUser = await this.databaseService.userdata.findUnique({
@@ -56,7 +55,7 @@ export class AuthService {
 
     const isMatch = await this.comparePasswords({
       password,
-      hash: foundUser.hashedpassword as string,
+      hash: foundUser.hashedpassword,
     });
 
     if (!isMatch) {
@@ -72,9 +71,15 @@ export class AuthService {
       throw new ForbiddenException();
     }
 
-    res.cookie('token', token);
+    res.cookie('token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+      path: '/',
+    });
 
-    return res.send({ message: 'Logged in successfully' });
+    return res.send({ message: 'Logged in successfully', access_token: token });
   }
 
   async hashPassword(password: string) {

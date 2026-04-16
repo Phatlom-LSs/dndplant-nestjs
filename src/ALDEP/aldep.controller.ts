@@ -1,4 +1,3 @@
-// src/ALDEP/aldep.controller.ts
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { AldepService } from './aldep.service';
 import { GenerateAldepDto } from './dto/aldep.dto';

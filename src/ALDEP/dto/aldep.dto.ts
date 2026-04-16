@@ -77,6 +77,11 @@ export class AldepGenerateDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  randomSeed?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   @Min(1)
   maxFragmentsPerDept?: number;
 

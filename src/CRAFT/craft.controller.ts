@@ -5,17 +5,32 @@ import {
   Get,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from 'src/auth/jwt.guard';
 import { CraftAlgoService } from './craft.service';
 import { CreateLayoutDto } from './dto/craft.dto';
+
+type AuthenticatedRequest = Request & {
+  user: {
+    id: number;
+    username: string;
+  };
+};
 
 @Controller('craft')
 export class layoutController {
   constructor(private readonly layoutService: CraftAlgoService) {}
 
   @Post('project')
-  async createProject(@Body() body: { name: string; userId: number }) {
-    return this.layoutService.createProject(body.name, body.userId);
+  @UseGuards(JwtAuthGuard)
+  async createProject(
+    @Body() body: { name: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.layoutService.createProject(body.name, req.user.id);
   }
 
   @Post('layout')

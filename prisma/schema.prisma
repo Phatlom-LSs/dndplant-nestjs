@@ -9,10 +9,10 @@ datasource db {
 
 model userdata {
   id       Int    @id @default(autoincrement())
-  username String @default("") @db.VarChar @unique
+  username String @default("") @db.VarChar(255) @unique
   hashedpassword String
   createdAt DateTime @default(now())
-  updateAt DateTime @updatedAt()
+  updateAt DateTime @updatedAt
   project Project[]
 }
 

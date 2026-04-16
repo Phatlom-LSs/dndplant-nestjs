@@ -40,11 +40,18 @@ export class CorelapController {
     // guard เบื้องต้น
     const n = departments.length;
     if (!n) throw new BadRequestException('departments required');
-    if (!Array.isArray(dto.closenessMatrix) || dto.closenessMatrix.length !== n) {
-      throw new BadRequestException('closenessMatrix must be NxN of departments');
+    if (
+      !Array.isArray(dto.closenessMatrix) ||
+      dto.closenessMatrix.length !== n
+    ) {
+      throw new BadRequestException(
+        'closenessMatrix must be NxN of departments',
+      );
     }
     if (!dto.closenessMatrix.every((r) => Array.isArray(r) && r.length === n)) {
-      throw new BadRequestException('closenessMatrix must be NxN of departments');
+      throw new BadRequestException(
+        'closenessMatrix must be NxN of departments',
+      );
     }
     if (!dto.gridWidth || !dto.gridHeight) {
       throw new BadRequestException('gridWidth/gridHeight required');

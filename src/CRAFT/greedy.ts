@@ -1,10 +1,15 @@
-type Department = { name: string; width: number; height: number; };
-type Position = { x: number; y: number; };
+type Department = { name: string; width: number; height: number };
+type Position = { x: number; y: number };
 
 // Pack แบบ row-major (เรียงใน grid ซ้าย-ขวา-ลงล่าง)
-function packDepartmentsRowMajor(order: Department[], gridSize: number): (Department & Position)[] {
+function packDepartmentsRowMajor(
+  order: Department[],
+  gridSize: number,
+): (Department & Position)[] {
   const out: (Department & Position)[] = [];
-  let cx = 0, cy = 0, rowHeight = 0;
+  let cx = 0,
+    cy = 0,
+    rowHeight = 0;
   for (const dep of order) {
     if (cx + dep.width > gridSize) {
       cx = 0;
@@ -30,9 +35,12 @@ function calcCost(
         const depA = layout[i];
         const depB = layout[j];
         const flow = flowMatrix[i][j]; // <--- cost จริงจาก matrix
-        const dist = metric === "euclidean"
-          ? Math.sqrt(Math.pow(depA.x - depB.x, 2) + Math.pow(depA.y - depB.y, 2))
-          : Math.abs(depA.x - depB.x) + Math.abs(depA.y - depB.y);
+        const dist =
+          metric === 'euclidean'
+            ? Math.sqrt(
+                Math.pow(depA.x - depB.x, 2) + Math.pow(depA.y - depB.y, 2),
+              )
+            : Math.abs(depA.x - depB.x) + Math.abs(depA.y - depB.y);
         total += dist * flow;
       }
     }

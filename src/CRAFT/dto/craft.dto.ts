@@ -20,6 +20,28 @@ export enum DepartmentKind {
   VOID = 'void',
 }
 
+export class DepartmentBlockDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  x!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  y!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  width!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  height!: number;
+}
+
 export class DepartmentDto {
   @IsString()
   name!: string;
@@ -44,6 +66,12 @@ export class DepartmentDto {
   @Min(1)
   height!: number;
 
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => DepartmentBlockDto)
+  blocks!: DepartmentBlockDto[];
+
   @IsEnum(DepartmentKind)
   type!: DepartmentKind; // 'dept' | 'void'
 
@@ -57,9 +85,16 @@ export class CreateLayoutDto {
   name!: string;
 
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  gridSize!: number;
+  @Min(0.1)
+  plantWidthMeters!: number;
+
+  @Type(() => Number)
+  @Min(0.1)
+  plantHeightMeters!: number;
+
+  @Type(() => Number)
+  @Min(0.1)
+  cellSizeMeters!: number;
 
   @IsString()
   projectId!: string;
@@ -72,6 +107,9 @@ export class CreateLayoutDto {
 
   @IsArray()
   flowMatrix: number[][];
+
+  @IsArray()
+  transportCostMatrix!: number[][];
 
   @IsArray()
   closenessMatrix: ('' | 'A' | 'E' | 'I' | 'O' | 'U' | 'X')[][];

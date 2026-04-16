@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
+import { NextFunction, Request, Response } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,20 +15,20 @@ async function bootstrap() {
   ].filter(Boolean) as string[];
 
   app.enableCors({
-    origin: (origin, callback) => {
+    origin: (origin: string | undefined, callback) => {
       if (!origin) return callback(null, true);
       if (FRONT_ORIGIN.includes(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
     maxAge: 600,
   });
 
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     res.header('Vary', 'Origin');
-    if (req.header === 'Options') {
+    if (req.method === 'OPTIONS') {
       res.header(
         'Access-Control-Allow-Methods',
         'GET,POST,PUT,PATCH,DELETE,OPTIONS',
@@ -39,4 +40,4 @@ async function bootstrap() {
   });
   await app.listen(process.env.PORT || 4000);
 }
-bootstrap();
+void bootstrap();

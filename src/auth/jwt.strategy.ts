@@ -8,19 +8,22 @@ import { Request } from 'express';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([JwtStrategy.extractJWT]),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (req: Request) => JwtStrategy.extractJWT(req),
+      ]),
       secretOrKey: jwtSecret,
     });
   }
 
   private static extractJWT(req: Request): string | null {
     if (req.cookies && 'token' in req.cookies) {
-      return req.cookies.token;
+      const token = req.cookies.token;
+      return typeof token === 'string' ? token : null;
     }
     return null;
   }
 
-  async validate(payload: { id: number; username: string }) {
+  validate(payload: { id: number; username: string }) {
     return payload;
   }
 }

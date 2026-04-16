@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtModule } from '@nestjs/jwt';
 import { craftAlgoModule } from './CRAFT/craft.module';
 import { CorelapModule } from './CORELAP/corelap.module';
+import { mainModule } from './main/main.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CorelapModule } from './CORELAP/corelap.module';
     JwtModule,
     craftAlgoModule,
     CorelapModule,
+    mainModule,
   ],
   controllers: [AppController],
   providers: [AppService],
